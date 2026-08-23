@@ -335,11 +335,27 @@ const CFG = {
   },
 };
 
+/* ------------------------------ storage ---------------------------------- */
+// Some contexts (private windows, sandboxed frames, blocked site data) throw on
+// the accessor itself, so every read and write is guarded. A missing best score
+// is not worth a broken game.
+const Store = {
+  get(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : v;
+    } catch (e) { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* nothing to do */ }
+  },
+};
+
 /* ------------------------------ game state ------------------------------- */
 const game = {
   state: "title",       // title | play | paused | over
   score: 0,
-  best: Number(localStorage.getItem("bks.best") || 0),
+  best: Number(Store.get("bks.best", 0)) || 0,
   lives: 3,
   level: 1,
   stonesKilled: 0,
@@ -705,7 +721,7 @@ function addScore(n) {
   }
   if (game.score > game.best) {
     game.best = game.score;
-    localStorage.setItem("bks.best", String(game.best));
+    Store.set("bks.best", String(game.best));
   }
 }
 
