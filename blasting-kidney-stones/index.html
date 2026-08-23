@@ -1,0 +1,1285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Blasting Kidney Stones</title>
+<style>
+  :root {
+    --ink: #ff5d73;
+    --ink-dim: #7a2b3b;
+    --glow: #ffd166;
+    --bg: #0b0409;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Courier New", ui-monospace, monospace;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  /* ---- overlays ---- */
+  .screen {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 24px;
+    background: radial-gradient(ellipse at center, rgba(40,4,14,.72), rgba(6,2,4,.92));
+    z-index: 5;
+  }
+  .screen[hidden] { display: none; }
+  h1 {
+    margin: 0 0 6px;
+    font-size: clamp(28px, 7vw, 64px);
+    letter-spacing: .12em;
+    color: var(--glow);
+    text-shadow: 0 0 18px rgba(255,209,102,.55);
+  }
+  h2 {
+    margin: 0 0 14px;
+    font-size: clamp(18px, 4.5vw, 30px);
+    letter-spacing: .18em;
+    color: var(--glow);
+  }
+  .sub {
+    margin: 0 0 22px; letter-spacing: .28em;
+    font-size: clamp(10px, 2.6vw, 14px);
+    color: var(--ink);
+    opacity: .85;
+  }
+  .keys {
+    display: grid; grid-template-columns: auto auto; gap: 6px 18px;
+    font-size: clamp(11px, 2.6vw, 15px);
+    margin: 0 0 26px; text-align: left; opacity: .9;
+  }
+  .keys b { color: var(--glow); font-weight: 700; }
+  .btn {
+    font: inherit; font-size: clamp(13px, 3.2vw, 18px);
+    letter-spacing: .2em;
+    padding: 12px 26px;
+    color: var(--bg); background: var(--glow);
+    border: 0; border-radius: 2px; cursor: pointer;
+    box-shadow: 0 0 24px rgba(255,209,102,.4);
+  }
+  .btn:active { transform: translateY(1px); }
+  .stat { font-size: clamp(12px, 3vw, 18px); margin: 2px 0; letter-spacing: .14em; }
+  .stat b { color: var(--glow); }
+  .fine { margin-top: 22px; font-size: 10px; letter-spacing: .2em; opacity: .45; max-width: 34em; line-height: 1.7; }
+
+  /* ---- touch controls ---- */
+  #touch { position: absolute; inset: 0; z-index: 4; display: none; }
+  #touch.on { display: block; }
+  .pad {
+    position: absolute; bottom: 18px;
+    width: 68px; height: 68px; border-radius: 50%;
+    border: 2px solid rgba(255,93,115,.5);
+    background: rgba(255,93,115,.08);
+    color: var(--ink); font-size: 22px; line-height: 64px; text-align: center;
+  }
+  .pad:active, .pad.held { background: rgba(255,209,102,.28); border-color: var(--glow); }
+  #tLeft  { left: 16px; }
+  #tRight { left: 96px; }
+  #tThrust{ right: 16px; bottom: 100px; }
+  #tFire  { right: 16px; }
+  #tJump  { right: 96px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+
+  <div id="touch">
+    <div class="pad" id="tLeft">&#8634;</div>
+    <div class="pad" id="tRight">&#8635;</div>
+    <div class="pad" id="tThrust">&#9650;</div>
+    <div class="pad" id="tFire">&#9679;</div>
+    <div class="pad" id="tJump">&#10022;</div>
+  </div>
+
+  <div class="screen" id="titleScreen">
+    <h1>BLASTING KIDNEY STONES</h1>
+    <p class="sub">LITHOTRIPSY DIVISION &middot; URETER PATROL</p>
+    <div class="keys">
+      <span><b>&#8592; &#8594;</b> / A D</span><span>rotate probe</span>
+      <span><b>&#8593;</b> / W</span><span>thrust</span>
+      <span><b>SPACE</b></span><span>fire shock pulse</span>
+      <span><b>SHIFT</b></span><span>hyperspace (risky)</span>
+      <span><b>P</b></span><span>pause</span>
+      <span><b>M</b></span><span>mute</span>
+    </div>
+    <button class="btn" id="startBtn">BEGIN PROCEDURE</button>
+    <p class="fine">Big stones shatter into gravel. Clear every fragment to advance.
+      Watch for bacteria colonies &mdash; they shoot back. Not medical advice.</p>
+  </div>
+
+  <div class="screen" id="overScreen" hidden>
+    <h2 id="overTitle">PROCEDURE TERMINATED</h2>
+    <p class="stat">SCORE <b id="finalScore">0</b></p>
+    <p class="stat">STONES PULVERIZED <b id="finalStones">0</b></p>
+    <p class="stat">DEEPEST LEVEL <b id="finalLevel">1</b></p>
+    <p class="stat">BEST <b id="finalBest">0</b></p>
+    <button class="btn" id="againBtn">SCRUB IN AGAIN</button>
+  </div>
+
+  <div class="screen" id="pauseScreen" hidden>
+    <h2>PAUSED</h2>
+    <p class="sub">PATIENT IS STABLE</p>
+    <button class="btn" id="resumeBtn">RESUME</button>
+  </div>
+</div>
+<script>
+"use strict";
+/* =========================================================================
+   Blasting Kidney Stones -- an Asteroids-style shooter set in the urinary
+   tract. Single file, no dependencies, no external assets.
+   ========================================================================= */
+
+/* ------------------------------- canvas ---------------------------------- */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+// Entity sizes and speeds scale with the viewport: a stone that plays fair on
+// a laptop would swallow half a phone screen.
+let SCALE = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+  SCALE = Math.max(0.62, Math.min(1.15, Math.min(W, H) / 680));
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* -------------------------------- utils ---------------------------------- */
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const pick = arr => arr[randInt(0, arr.length - 1)];
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+
+// Playfield wraps, so the shortest delta between two points may cross an edge.
+function wrapDelta(a, b, size) {
+  let d = a - b;
+  if (d > size / 2) d -= size;
+  else if (d < -size / 2) d += size;
+  return d;
+}
+function wrapDist(ax, ay, bx, by) {
+  const dx = wrapDelta(ax, bx, W), dy = wrapDelta(ay, by, H);
+  return Math.hypot(dx, dy);
+}
+function wrapPos(o) {
+  if (o.x < 0) o.x += W; else if (o.x >= W) o.x -= W;
+  if (o.y < 0) o.y += H; else if (o.y >= H) o.y -= H;
+}
+
+/* -------------------------------- audio ---------------------------------- */
+// Everything is synthesized: clicks, zaps, noise bursts and a heartbeat.
+const Sound = {
+  ctx: null,
+  muted: false,
+  master: null,
+  noiseBuf: null,
+
+  init() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.32;
+    this.master.connect(this.ctx.destination);
+
+    const len = Math.floor(this.ctx.sampleRate * 0.6);
+    this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  },
+
+  resume() {
+    this.init();
+    if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+  },
+
+  get on() { return this.ctx && !this.muted; },
+
+  tone(freq, dur, type = "square", vol = 0.5, slideTo = null) {
+    if (!this.on) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    osc.connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  },
+
+  noise(dur, vol = 0.5, cutoff = 1200, sweepTo = null) {
+    if (!this.on) return;
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.setValueAtTime(cutoff, t);
+    if (sweepTo) filt.frequency.exponentialRampToValueAtTime(Math.max(60, sweepTo), t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    src.connect(filt).connect(g).connect(this.master);
+    src.start(t);
+    src.stop(t + dur);
+  },
+
+  fire()      { this.tone(880, 0.12, "square", 0.16, 180); },
+  shatter(sz) { this.noise(0.26 + sz * 0.12, 0.42, 900 + sz * 500, 90); },
+  thump(hi)   { this.tone(hi ? 84 : 62, 0.16, "sine", 0.5); },
+  die()       { this.noise(1.1, 0.6, 1500, 60); this.tone(190, 0.9, "sawtooth", 0.22, 40); },
+  jump()      { this.tone(220, 0.3, "sine", 0.28, 1500); },
+  extra()     { this.tone(660, 0.1, "triangle", 0.3); setTimeout(() => this.tone(990, 0.18, "triangle", 0.3), 110); },
+  bug()       { this.tone(300, 0.09, "sawtooth", 0.14, 240); },
+  bugShot()   { this.tone(420, 0.14, "triangle", 0.14, 140); },
+  levelUp()   {
+    [523, 659, 784, 1047].forEach((f, i) =>
+      setTimeout(() => this.tone(f, 0.16, "triangle", 0.22), i * 90));
+  },
+};
+
+/* -------------------------------- input ---------------------------------- */
+const keys = Object.create(null);
+const KEYMAP = {
+  ArrowLeft: "left", KeyA: "left",
+  ArrowRight: "right", KeyD: "right",
+  ArrowUp: "thrust", KeyW: "thrust",
+  Space: "fire", ShiftLeft: "jump", ShiftRight: "jump",
+};
+
+window.addEventListener("keydown", e => {
+  if (e.code === "KeyP" || e.code === "Escape") { togglePause(); e.preventDefault(); return; }
+  if (e.code === "KeyM") { toggleMute(); return; }
+  if (e.code === "Enter" && game.state !== "play") { startGame(); e.preventDefault(); return; }
+  const k = KEYMAP[e.code];
+  if (!k) return;
+  e.preventDefault();
+  if (!keys[k]) keys[k + "Pressed"] = true;   // edge trigger for fire/jump
+  keys[k] = true;
+}, { passive: false });
+
+window.addEventListener("keyup", e => {
+  const k = KEYMAP[e.code];
+  if (k) { keys[k] = false; e.preventDefault(); }
+}, { passive: false });
+
+window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+
+// Touch pads mirror the keyboard flags.
+const isTouch = matchMedia("(hover: none) and (pointer: coarse)").matches;
+if (isTouch) document.getElementById("touch").classList.add("on");
+
+function bindPad(id, key) {
+  const el = document.getElementById(id);
+  const down = e => {
+    e.preventDefault();
+    if (!keys[key]) keys[key + "Pressed"] = true;
+    keys[key] = true;
+    el.classList.add("held");
+    Sound.resume();
+  };
+  const up = e => { e.preventDefault(); keys[key] = false; el.classList.remove("held"); };
+  el.addEventListener("touchstart", down, { passive: false });
+  el.addEventListener("touchend", up, { passive: false });
+  el.addEventListener("touchcancel", up, { passive: false });
+  el.addEventListener("mousedown", down);
+  el.addEventListener("mouseup", up);
+  el.addEventListener("mouseleave", up);
+}
+bindPad("tLeft", "left");
+bindPad("tRight", "right");
+bindPad("tThrust", "thrust");
+bindPad("tFire", "fire");
+bindPad("tJump", "jump");
+
+/* ------------------------------- tuning ---------------------------------- */
+const CFG = {
+  shipR: 13,
+  turn: 3.9,            // rad / s
+  accel: 340,           // px / s^2
+  drag: 0.72,           // velocity retained per second
+  maxSpeed: 460,
+  bulletSpeed: 600,
+  bulletLife: 1.05,
+  maxBullets: 5,
+  fireDelay: 0.16,
+  respawnDelay: 1.4,
+  invulnTime: 2.6,
+  jumpCooldown: 1.2,
+  extraLifeEvery: 10000,
+  stone: {
+    3: { r: 52, score: 20,  speed: 34, hp: 1 },
+    2: { r: 31, score: 50,  speed: 52, hp: 1 },
+    1: { r: 17, score: 100, speed: 74, hp: 1 },
+  },
+};
+
+/* ------------------------------ storage ---------------------------------- */
+// Some contexts (private windows, sandboxed frames, blocked site data) throw on
+// the accessor itself, so every read and write is guarded. A missing best score
+// is not worth a broken game.
+const Store = {
+  get(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : v;
+    } catch (e) { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* nothing to do */ }
+  },
+};
+
+/* ------------------------------ game state ------------------------------- */
+const game = {
+  state: "title",       // title | play | paused | over
+  score: 0,
+  best: Number(Store.get("bks.best", 0)) || 0,
+  lives: 3,
+  level: 1,
+  stonesKilled: 0,
+  nextExtra: CFG.extraLifeEvery,
+  shake: 0,
+  levelBanner: 0,
+  beatTimer: 0,
+  beatHigh: false,
+  respawn: 0,
+  bugTimer: 0,
+  flash: 0,
+};
+
+let ship = null;
+let bullets = [];
+let stones = [];
+let bugs = [];
+let bugShots = [];
+let bits = [];          // particles / debris
+let floaters = [];      // background blood cells
+let toasts = [];        // floating score text
+
+/* -------------------------------- ship ----------------------------------- */
+function makeShip() {
+  return {
+    x: W / 2, y: H / 2, vx: 0, vy: 0,
+    a: -Math.PI / 2,
+    r: CFG.shipR * SCALE,
+    thrusting: false,
+    invuln: CFG.invulnTime,
+    cool: 0,
+    jumpCool: 0,
+    alive: true,
+  };
+}
+
+function updateShip(dt) {
+  if (!ship || !ship.alive) return;
+
+  if (keys.left) ship.a -= CFG.turn * dt;
+  if (keys.right) ship.a += CFG.turn * dt;
+
+  ship.thrusting = !!keys.thrust;
+  if (ship.thrusting) {
+    ship.vx += Math.cos(ship.a) * CFG.accel * SCALE * dt;
+    ship.vy += Math.sin(ship.a) * CFG.accel * SCALE * dt;
+    // exhaust
+    if (Math.random() < 0.85) {
+      const back = ship.a + Math.PI + rand(-0.35, 0.35);
+      bits.push(spark(
+        ship.x + Math.cos(back) * ship.r,
+        ship.y + Math.sin(back) * ship.r,
+        Math.cos(back) * rand(60, 180) + ship.vx * 0.5,
+        Math.sin(back) * rand(60, 180) + ship.vy * 0.5,
+        rand(0.18, 0.4), "#ffd166"));
+    }
+  }
+
+  const drop = Math.pow(CFG.drag, dt);
+  ship.vx *= drop;
+  ship.vy *= drop;
+
+  const sp = Math.hypot(ship.vx, ship.vy);
+  const cap = CFG.maxSpeed * SCALE;
+  if (sp > cap) {
+    ship.vx = ship.vx / sp * cap;
+    ship.vy = ship.vy / sp * cap;
+  }
+
+  ship.x += ship.vx * dt;
+  ship.y += ship.vy * dt;
+  wrapPos(ship);
+
+  ship.cool = Math.max(0, ship.cool - dt);
+  ship.jumpCool = Math.max(0, ship.jumpCool - dt);
+  ship.invuln = Math.max(0, ship.invuln - dt);
+
+  if (keys.firePressed || (keys.fire && ship.cool === 0)) {
+    keys.firePressed = false;
+    fire();
+  }
+  if (keys.jumpPressed) {
+    keys.jumpPressed = false;
+    hyperspace();
+  }
+}
+
+function fire() {
+  if (!ship || !ship.alive || ship.cool > 0) return;
+  if (bullets.length >= CFG.maxBullets) return;
+  ship.cool = CFG.fireDelay;
+  const nx = Math.cos(ship.a), ny = Math.sin(ship.a);
+  bullets.push({
+    x: ship.x + nx * ship.r,
+    y: ship.y + ny * ship.r,
+    vx: nx * CFG.bulletSpeed * SCALE + ship.vx * 0.35,
+    vy: ny * CFG.bulletSpeed * SCALE + ship.vy * 0.35,
+    life: CFG.bulletLife,
+    r: 2.5,
+  });
+  // gentle recoil, because momentum is fun
+  ship.vx -= nx * 16;
+  ship.vy -= ny * 16;
+  Sound.fire();
+}
+
+function hyperspace() {
+  if (!ship || !ship.alive || ship.jumpCool > 0) return;
+  ship.jumpCool = CFG.jumpCooldown;
+  burst(ship.x, ship.y, 14, "#7bdff2", 130);
+  // 8% chance the probe rematerializes inside a stone. Risk is the point.
+  const doomed = Math.random() < 0.08;
+  ship.x = rand(40, W - 40);
+  ship.y = rand(40, H - 40);
+  ship.vx = ship.vy = 0;
+  Sound.jump();
+  burst(ship.x, ship.y, 14, "#7bdff2", 130);
+  if (doomed) killShip();
+  else ship.invuln = Math.max(ship.invuln, 0.6);
+}
+
+/* ------------------------------- stones ---------------------------------- */
+function makeStone(size, x, y, speedBoost = 0) {
+  const spec = CFG.stone[size];
+  const n = randInt(11, 15);
+  const verts = [];
+  // A random walk around the circle gives a lumpy, organic outline; the
+  // occasional notch keeps it from reading as a smooth pebble.
+  let m = rand(0.85, 1.05);
+  for (let i = 0; i < n; i++) {
+    const ang = (i / n) * TAU + rand(-0.1, 0.1);
+    m = clamp(m + rand(-0.2, 0.2), 0.66, 1.14);
+    verts.push({ ang, m: Math.random() < 0.18 ? m * 0.78 : m });
+  }
+  const specks = [];
+  for (let i = 0; i < size * 3; i++) {
+    specks.push({ a: rand(0, TAU), d: rand(0.15, 0.68), s: rand(1, 2.4) });
+  }
+  const dir = rand(0, TAU);
+  const spd = (spec.speed + speedBoost) * SCALE * rand(0.65, 1.35);
+  return {
+    size, x, y, r: spec.r * SCALE * rand(0.9, 1.1),
+    vx: Math.cos(dir) * spd,
+    vy: Math.sin(dir) * spd,
+    rot: rand(0, TAU),
+    spin: rand(-1.1, 1.1) * (0.4 + 0.5 / size),
+    verts, specks,
+    hit: 0,
+  };
+}
+
+function spawnLevel() {
+  const count = Math.min(3 + game.level, 11);
+  const boost = (game.level - 1) * 4;
+  for (let i = 0; i < count; i++) {
+    let x, y, tries = 0;
+    do {
+      x = rand(0, W); y = rand(0, H);
+      tries++;
+    } while (tries < 60 && ship && wrapDist(x, y, ship.x, ship.y) < Math.min(W, H) * 0.32);
+    stones.push(makeStone(3, x, y, boost));
+  }
+  game.levelBanner = 2.2;
+  game.bugTimer = rand(12, 20) - Math.min(8, game.level * 0.7);
+}
+
+function splitStone(st) {
+  game.stonesKilled++;
+  addScore(CFG.stone[st.size].score);
+  Sound.shatter(st.size);
+  game.shake = Math.min(16, game.shake + 3 + st.size * 2);
+  gravel(st);
+  if (st.size > 1) {
+    const boost = (game.level - 1) * 4;
+    for (let i = 0; i < 2; i++) {
+      const kid = makeStone(st.size - 1, st.x, st.y, boost);
+      const off = rand(0, TAU);
+      kid.x += Math.cos(off) * st.r * 0.35;
+      kid.y += Math.sin(off) * st.r * 0.35;
+      // inherit some of the parent's drift so fragments spray outward
+      kid.vx += st.vx * 0.4;
+      kid.vy += st.vy * 0.4;
+      stones.push(kid);
+    }
+  }
+}
+
+/* ------------------------- bacteria (the saucers) ------------------------- */
+function spawnBug() {
+  // Small colonies show up as the level count climbs; they aim properly.
+  const small = Math.random() < clamp(0.15 + game.level * 0.06, 0.15, 0.7);
+  const fromLeft = Math.random() < 0.5;
+  bugs.push({
+    small,
+    r: (small ? 13 : 21) * SCALE,
+    x: fromLeft ? -30 : W + 30,
+    y: rand(H * 0.12, H * 0.88),
+    vx: (fromLeft ? 1 : -1) * (small ? 118 : 86) * SCALE,
+    vy: 0,
+    zig: rand(0.6, 1.4),
+    t: 0,
+    shootIn: rand(0.6, 1.4),
+    score: small ? 1000 : 200,
+    wobble: rand(0, TAU),
+  });
+  Sound.bug();
+}
+
+function updateBugs(dt) {
+  game.bugTimer -= dt;
+  if (game.bugTimer <= 0 && bugs.length < 2 && stones.length > 0) {
+    spawnBug();
+    game.bugTimer = rand(14, 26);
+  }
+
+  for (let i = bugs.length - 1; i >= 0; i--) {
+    const b = bugs[i];
+    b.t += dt;
+    b.wobble += dt * 6;
+    // lazy vertical drift, changing every so often
+    if (Math.random() < dt * 0.9) b.vy = rand(-70, 70) * b.zig * SCALE;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.y = clamp(b.y, 20, H - 20);
+    if (b.x < -60 || b.x > W + 60) { bugs.splice(i, 1); continue; }
+    if (Math.random() < dt * 3) Sound.bug();
+
+    b.shootIn -= dt;
+    if (b.shootIn <= 0 && ship && ship.alive) {
+      b.shootIn = rand(1.1, 2.3) - Math.min(0.7, game.level * 0.05);
+      let ang;
+      if (b.small) {
+        // aims at the probe, with a small error that shrinks as levels rise
+        const err = Math.max(0.05, 0.42 - game.level * 0.03);
+        ang = Math.atan2(wrapDelta(ship.y, b.y, H), wrapDelta(ship.x, b.x, W)) + rand(-err, err);
+      } else {
+        ang = rand(0, TAU);
+      }
+      bugShots.push({
+        x: b.x, y: b.y,
+        vx: Math.cos(ang) * 300 * SCALE, vy: Math.sin(ang) * 300 * SCALE,
+        life: 1.5, r: 3,
+      });
+      Sound.bugShot();
+    }
+  }
+
+  for (let i = bugShots.length - 1; i >= 0; i--) {
+    const s = bugShots[i];
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    wrapPos(s);
+    s.life -= dt;
+    if (s.life <= 0) bugShots.splice(i, 1);
+  }
+}
+
+function killBug(b, i) {
+  addScore(b.score);
+  burst(b.x, b.y, 22, "#9bf6a0", 220);
+  Sound.shatter(2);
+  game.shake = Math.min(16, game.shake + 5);
+  toasts.push({ x: b.x, y: b.y, text: "+" + b.score, life: 1.1, color: "#9bf6a0" });
+  bugs.splice(i, 1);
+}
+
+/* ----------------------------- particles --------------------------------- */
+function spark(x, y, vx, vy, life, color) {
+  return { kind: "spark", x, y, vx, vy, life, max: life, color };
+}
+
+function burst(x, y, n, color, speed) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU), s = rand(speed * 0.2, speed);
+    bits.push(spark(x, y, Math.cos(a) * s, Math.sin(a) * s, rand(0.3, 0.9), color));
+  }
+}
+
+// A shattered stone throws off little tumbling chips.
+function gravel(st) {
+  const n = 5 + st.size * 4;
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, TAU), s = rand(40, 90 + st.size * 40);
+    bits.push({
+      kind: "chip",
+      x: st.x + Math.cos(a) * rand(0, st.r * 0.6),
+      y: st.y + Math.sin(a) * rand(0, st.r * 0.6),
+      vx: Math.cos(a) * s + st.vx * 0.3,
+      vy: Math.sin(a) * s + st.vy * 0.3,
+      life: rand(0.5, 1.3), max: 1.3,
+      rot: rand(0, TAU), spin: rand(-6, 6),
+      size: rand(2, 3 + st.size),
+    });
+  }
+  burst(st.x, st.y, 4 + st.size * 3, "#ffe9c9", 110);
+}
+
+function shipDebris() {
+  for (let i = 0; i < 3; i++) {
+    const a = rand(0, TAU), s = rand(50, 150);
+    bits.push({
+      kind: "shard",
+      x: ship.x, y: ship.y,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 1.6, max: 1.6,
+      rot: rand(0, TAU), spin: rand(-4, 4),
+      len: rand(9, 17),
+    });
+  }
+  burst(ship.x, ship.y, 26, "#ff5d73", 240);
+  burst(ship.x, ship.y, 12, "#ffd166", 160);
+}
+
+function updateBits(dt) {
+  for (let i = bits.length - 1; i >= 0; i--) {
+    const p = bits[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    const drop = Math.pow(0.55, dt);
+    p.vx *= drop; p.vy *= drop;
+    if (p.rot !== undefined) p.rot += p.spin * dt;
+    wrapPos(p);
+    p.life -= dt;
+    if (p.life <= 0) bits.splice(i, 1);
+  }
+  for (let i = toasts.length - 1; i >= 0; i--) {
+    const t = toasts[i];
+    t.y -= 26 * dt;
+    t.life -= dt;
+    if (t.life <= 0) toasts.splice(i, 1);
+  }
+}
+
+/* --------------------------- background wash ----------------------------- */
+function seedFloaters() {
+  floaters = [];
+  const n = Math.round((W * H) / 26000) + 20;
+  for (let i = 0; i < n; i++) {
+    floaters.push({
+      x: rand(0, W), y: rand(0, H),
+      r: rand(1.2, 4.6),
+      vx: rand(-9, 9), vy: rand(-9, 9),
+      a: rand(0.06, 0.3),
+      cell: Math.random() < 0.25,
+    });
+  }
+}
+
+function updateFloaters(dt) {
+  for (const f of floaters) {
+    f.x += f.vx * dt; f.y += f.vy * dt;
+    wrapPos(f);
+  }
+}
+
+/* ------------------------------- scoring --------------------------------- */
+function addScore(n) {
+  game.score += n;
+  if (game.score >= game.nextExtra) {
+    game.nextExtra += CFG.extraLifeEvery;
+    game.lives++;
+    Sound.extra();
+    toasts.push({ x: W / 2, y: H * 0.3, text: "EXTRA PROBE", life: 1.8, color: "#ffd166" });
+  }
+  if (game.score > game.best) {
+    game.best = game.score;
+    Store.set("bks.best", String(game.best));
+  }
+}
+
+/* ----------------------------- collisions -------------------------------- */
+function collide() {
+  // bullets vs stones
+  for (let bi = bullets.length - 1; bi >= 0; bi--) {
+    const b = bullets[bi];
+    let done = false;
+    for (let si = stones.length - 1; si >= 0; si--) {
+      const st = stones[si];
+      if (wrapDist(b.x, b.y, st.x, st.y) < st.r * 0.92) {
+        bullets.splice(bi, 1);
+        stones.splice(si, 1);
+        splitStone(st);
+        toasts.push({ x: st.x, y: st.y, text: "+" + CFG.stone[st.size].score, life: 0.9, color: "#ffe9c9" });
+        done = true;
+        break;
+      }
+    }
+    if (done) continue;
+    // bullets vs bacteria
+    for (let gi = bugs.length - 1; gi >= 0; gi--) {
+      if (wrapDist(b.x, b.y, bugs[gi].x, bugs[gi].y) < bugs[gi].r + 3) {
+        bullets.splice(bi, 1);
+        killBug(bugs[gi], gi);
+        break;
+      }
+    }
+  }
+
+  // stones vs bacteria -- friendly fire, and it looks great
+  for (let gi = bugs.length - 1; gi >= 0; gi--) {
+    const b = bugs[gi];
+    for (let si = stones.length - 1; si >= 0; si--) {
+      const st = stones[si];
+      if (wrapDist(b.x, b.y, st.x, st.y) < st.r * 0.9 + b.r) {
+        burst(b.x, b.y, 18, "#9bf6a0", 200);
+        bugs.splice(gi, 1);
+        stones.splice(si, 1);
+        splitStone(st);
+        break;
+      }
+    }
+  }
+
+  if (!ship || !ship.alive) return;
+  const vulnerable = ship.invuln <= 0;
+
+  // stones vs probe
+  for (let si = stones.length - 1; si >= 0; si--) {
+    const st = stones[si];
+    if (wrapDist(ship.x, ship.y, st.x, st.y) < st.r * 0.86 + ship.r * 0.7) {
+      if (vulnerable) {
+        stones.splice(si, 1);
+        splitStone(st);
+        killShip();
+        return;
+      }
+    }
+  }
+
+  if (!vulnerable) return;
+
+  for (let gi = bugs.length - 1; gi >= 0; gi--) {
+    if (wrapDist(ship.x, ship.y, bugs[gi].x, bugs[gi].y) < bugs[gi].r + ship.r * 0.8) {
+      killBug(bugs[gi], gi);
+      killShip();
+      return;
+    }
+  }
+
+  for (let i = bugShots.length - 1; i >= 0; i--) {
+    if (wrapDist(ship.x, ship.y, bugShots[i].x, bugShots[i].y) < ship.r * 0.85) {
+      bugShots.splice(i, 1);
+      killShip();
+      return;
+    }
+  }
+}
+
+function killShip() {
+  if (!ship || !ship.alive) return;
+  shipDebris();
+  Sound.die();
+  ship.alive = false;
+  game.shake = 22;
+  game.flash = 0.35;
+  game.lives--;
+  game.respawn = game.lives > 0 ? CFG.respawnDelay : 2.2;
+}
+
+// Wait for a calm patch of screen before putting the probe back.
+function centerIsClear() {
+  const cx = W / 2, cy = H / 2, need = Math.min(W, H) * 0.22;
+  for (const st of stones) if (wrapDist(cx, cy, st.x, st.y) < st.r + need) return false;
+  for (const b of bugs) if (wrapDist(cx, cy, b.x, b.y) < b.r + need) return false;
+  for (const s of bugShots) if (wrapDist(cx, cy, s.x, s.y) < need * 0.8) return false;
+  return true;
+}
+
+/* ------------------------------ rendering -------------------------------- */
+function drawBackground() {
+  // tissue-toned vignette
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+  g.addColorStop(0, "#1a0710");
+  g.addColorStop(1, "#070306");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  for (const f of floaters) {
+    ctx.globalAlpha = f.a;
+    ctx.fillStyle = f.cell ? "#ff8fa3" : "#5c2a3a";
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r, 0, TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawStone(st) {
+  ctx.save();
+  ctx.translate(st.x, st.y);
+  ctx.rotate(st.rot);
+
+  ctx.beginPath();
+  for (let i = 0; i < st.verts.length; i++) {
+    const v = st.verts[i];
+    const px = Math.cos(v.ang) * st.r * v.m;
+    const py = Math.sin(v.ang) * st.r * v.m;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+
+  ctx.fillStyle = "rgba(60, 34, 20, 0.55)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#e8c39e";
+  ctx.shadowColor = "rgba(232,195,158,.5)";
+  ctx.shadowBlur = 8;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // crystalline speckles so each stone reads as gritty, not smooth
+  ctx.fillStyle = "rgba(255,235,205,.55)";
+  for (const s of st.specks) {
+    ctx.beginPath();
+    ctx.arc(Math.cos(s.a) * st.r * s.d, Math.sin(s.a) * st.r * s.d, s.s, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawShip() {
+  if (!ship || !ship.alive) return;
+  // blink while the spawn shield is up
+  if (ship.invuln > 0 && Math.floor(ship.invuln * 12) % 2 === 0) return;
+
+  ctx.save();
+  ctx.translate(ship.x, ship.y);
+  ctx.rotate(ship.a);
+  const r = ship.r;
+
+  if (ship.thrusting) {
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.7, -r * 0.42);
+    ctx.lineTo(-r * (1.5 + Math.random() * 0.7), 0);
+    ctx.lineTo(-r * 0.7, r * 0.42);
+    ctx.strokeStyle = "#ffd166";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // probe hull
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(-r * 0.75, r * 0.75);
+  ctx.lineTo(-r * 0.42, 0);
+  ctx.lineTo(-r * 0.75, -r * 0.75);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(20,40,52,.7)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#7bdff2";
+  ctx.shadowColor = "rgba(123,223,242,.75)";
+  ctx.shadowBlur = 10;
+  ctx.stroke();
+
+  // emitter tip
+  ctx.beginPath();
+  ctx.arc(r * 0.72, 0, 2.4, 0, TAU);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+
+  if (ship.invuln > 0) {
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.75, 0, TAU);
+    ctx.strokeStyle = "rgba(123,223,242,.4)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.shadowBlur = 0;
+}
+
+function drawBug(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  const squish = 1 + Math.sin(b.wobble) * 0.12;
+
+  ctx.beginPath();
+  ctx.ellipse(0, 0, b.r * squish, b.r * 0.62 / squish, 0, 0, TAU);
+  ctx.fillStyle = "rgba(30,70,40,.6)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#9bf6a0";
+  ctx.shadowColor = "rgba(155,246,160,.7)";
+  ctx.shadowBlur = 10;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // flagella
+  ctx.beginPath();
+  for (let i = -1; i <= 1; i += 2) {
+    const base = b.r * squish * i;
+    ctx.moveTo(base, 0);
+    ctx.quadraticCurveTo(
+      base + i * b.r * 0.5, Math.sin(b.wobble + i) * b.r * 0.5,
+      base + i * b.r * 0.95, Math.cos(b.wobble * 1.3 + i) * b.r * 0.4);
+  }
+  ctx.strokeStyle = "rgba(155,246,160,.8)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // nucleus dots
+  ctx.fillStyle = "#d7ffd9";
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.arc(i * b.r * 0.4, 0, b.r * 0.11, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBits() {
+  for (const p of bits) {
+    const a = clamp(p.life / (p.max || p.life), 0, 1);
+    ctx.globalAlpha = a;
+    if (p.kind === "spark") {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.8, 0, TAU);
+      ctx.fill();
+    } else if (p.kind === "chip") {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.strokeStyle = "#e8c39e";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-p.size, -p.size * 0.5);
+      ctx.lineTo(p.size, -p.size * 0.2);
+      ctx.lineTo(p.size * 0.3, p.size);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    } else if (p.kind === "shard") {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.strokeStyle = "#7bdff2";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-p.len / 2, 0);
+      ctx.lineTo(p.len / 2, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawShots() {
+  for (const b of bullets) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "#7bdff2";
+    ctx.shadowBlur = 12;
+    ctx.fill();
+  }
+  for (const s of bugShots) {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, TAU);
+    ctx.fillStyle = "#c9ffd0";
+    ctx.shadowColor = "#9bf6a0";
+    ctx.shadowBlur = 12;
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+}
+
+function drawProbeIcon(x, y, s) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-Math.PI / 2);
+  ctx.beginPath();
+  ctx.moveTo(s, 0);
+  ctx.lineTo(-s * 0.75, s * 0.75);
+  ctx.lineTo(-s * 0.42, 0);
+  ctx.lineTo(-s * 0.75, -s * 0.75);
+  ctx.closePath();
+  ctx.strokeStyle = "#7bdff2";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawHUD() {
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#ffd166";
+  ctx.font = "bold 22px 'Courier New', monospace";
+  ctx.textAlign = "left";
+  ctx.fillText(String(game.score).padStart(5, "0"), 18, 16);
+
+  ctx.font = "12px 'Courier New', monospace";
+  ctx.fillStyle = "#ff8fa3";
+  ctx.fillText("BEST " + game.best, 18, 44);
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#ffd166";
+  ctx.font = "bold 14px 'Courier New', monospace";
+  ctx.fillText("STAGE " + game.level, W - 18, 18);
+  ctx.fillStyle = "#ff8fa3";
+  ctx.font = "12px 'Courier New', monospace";
+  ctx.fillText("STONES " + stones.length, W - 18, 38);
+  if (Sound.muted) ctx.fillText("MUTED", W - 18, 56);
+
+  for (let i = 0; i < Math.min(game.lives, 8); i++) drawProbeIcon(30 + i * 22, 76, 8);
+  if (game.lives > 8) {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#7bdff2";
+    ctx.fillText("x" + game.lives, 30 + 8 * 22, 70);
+  }
+
+  ctx.textAlign = "center";
+  if (game.levelBanner > 0) {
+    ctx.globalAlpha = clamp(game.levelBanner, 0, 1);
+    ctx.fillStyle = "#ffd166";
+    ctx.font = "bold 30px 'Courier New', monospace";
+    ctx.fillText("STAGE " + game.level, W / 2, H * 0.36);
+    ctx.font = "13px 'Courier New', monospace";
+    ctx.fillStyle = "#ff8fa3";
+    ctx.fillText(stageBlurb(game.level), W / 2, H * 0.36 + 40);
+    ctx.globalAlpha = 1;
+  }
+
+  if (ship && !ship.alive && game.lives > 0) {
+    ctx.fillStyle = "#ff5d73";
+    ctx.font = "14px 'Courier New', monospace";
+    ctx.fillText("RE-INSERTING PROBE", W / 2, H * 0.62);
+  }
+
+  for (const t of toasts) {
+    ctx.globalAlpha = clamp(t.life, 0, 1);
+    ctx.fillStyle = t.color;
+    ctx.font = "bold 14px 'Courier New', monospace";
+    ctx.fillText(t.text, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+const BLURBS = [
+  "LOWER URETER", "MID URETER", "RENAL PELVIS", "LOWER CALYX",
+  "UPPER CALYX", "STAGHORN TERRITORY", "DEEP CORTEX", "GOOD LUCK, DOCTOR",
+];
+function stageBlurb(n) {
+  return BLURBS[Math.min(n - 1, BLURBS.length - 1)];
+}
+
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (game.shake > 0.2) {
+    ctx.translate(rand(-game.shake, game.shake) * 0.35, rand(-game.shake, game.shake) * 0.35);
+  }
+
+  drawBackground();
+  for (const st of stones) drawStone(st);
+  for (const b of bugs) drawBug(b);
+  drawBits();
+  drawShots();
+  drawShip();
+
+  if (game.flash > 0) {
+    ctx.fillStyle = "rgba(255,93,115," + (game.flash * 0.8).toFixed(3) + ")";
+    ctx.fillRect(-40, -40, W + 80, H + 80);
+  }
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (game.state === "play" || game.state === "paused") drawHUD();
+}
+
+/* ------------------------------ main loop -------------------------------- */
+const titleScreen = document.getElementById("titleScreen");
+const overScreen = document.getElementById("overScreen");
+const pauseScreen = document.getElementById("pauseScreen");
+
+function step(dt) {
+  updateFloaters(dt);
+  updateBits(dt);
+  game.shake = Math.max(0, game.shake - dt * 34);
+  game.flash = Math.max(0, game.flash - dt * 1.2);
+  game.levelBanner = Math.max(0, game.levelBanner - dt);
+
+  if (game.state !== "play") {
+    // attract mode: stones keep tumbling behind the overlay cards
+    for (const st of stones) {
+      st.x += st.vx * dt;
+      st.y += st.vy * dt;
+      st.rot += st.spin * dt;
+      wrapPos(st);
+    }
+    return;
+  }
+
+  updateShip(dt);
+  updateBugs(dt);
+
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    wrapPos(b);
+    b.life -= dt;
+    if (b.life <= 0) bullets.splice(i, 1);
+  }
+
+  for (const st of stones) {
+    st.x += st.vx * dt;
+    st.y += st.vy * dt;
+    st.rot += st.spin * dt;
+    wrapPos(st);
+  }
+
+  collide();
+
+  // heartbeat: two-tone thump that speeds up as the field clears
+  const total = Math.max(1, Math.min(3 + game.level, 11));
+  const pressure = 1 - clamp(stones.length / (total * 2.2), 0, 1);
+  game.beatTimer -= dt;
+  if (game.beatTimer <= 0 && stones.length > 0) {
+    game.beatTimer = 1.05 - pressure * 0.6;
+    Sound.thump(game.beatHigh);
+    game.beatHigh = !game.beatHigh;
+  }
+
+  // respawn / game over
+  if (ship && !ship.alive) {
+    game.respawn -= dt;
+    if (game.respawn <= 0) {
+      if (game.lives > 0) {
+        if (centerIsClear() || game.respawn < -3) {
+          ship = makeShip();
+          bugShots.length = 0;
+        }
+      } else {
+        endGame();
+        return;
+      }
+    }
+  }
+
+  // level cleared
+  if (stones.length === 0 && ship && ship.alive) {
+    game.level++;
+    bugs.length = 0;
+    bugShots.length = 0;
+    Sound.levelUp();
+    spawnLevel();
+    addScore(250 + game.level * 50);
+    toasts.push({ x: W / 2, y: H * 0.44, text: "TRACT CLEAR  +" + (250 + game.level * 50), life: 2, color: "#9bf6a0" });
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  // clamp dt so a backgrounded tab doesn't teleport everything
+  const dt = Math.min(0.05, (now - last) / 1000) || 0;
+  last = now;
+  step(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* --------------------------- state transitions --------------------------- */
+function startGame() {
+  Sound.resume();
+  game.state = "play";
+  game.score = 0;
+  game.lives = 3;
+  game.level = 1;
+  game.stonesKilled = 0;
+  game.nextExtra = CFG.extraLifeEvery;
+  game.shake = 0;
+  game.flash = 0;
+  game.beatTimer = 0;
+  game.respawn = 0;
+  bullets = []; stones = []; bugs = []; bugShots = []; bits = []; toasts = [];
+  ship = makeShip();
+  seedFloaters();
+  spawnLevel();
+  titleScreen.hidden = true;
+  overScreen.hidden = true;
+  pauseScreen.hidden = true;
+}
+
+function endGame() {
+  game.state = "over";
+  ship = null;
+  document.getElementById("finalScore").textContent = game.score;
+  document.getElementById("finalStones").textContent = game.stonesKilled;
+  document.getElementById("finalLevel").textContent = game.level;
+  document.getElementById("finalBest").textContent = game.best;
+  document.getElementById("overTitle").textContent =
+    game.score >= game.best && game.score > 0 ? "NEW RECORD" : "PROCEDURE TERMINATED";
+  overScreen.hidden = false;
+}
+
+function togglePause() {
+  if (game.state === "play") {
+    game.state = "paused";
+    pauseScreen.hidden = false;
+  } else if (game.state === "paused") {
+    game.state = "play";
+    pauseScreen.hidden = true;
+    for (const k in keys) keys[k] = false;
+  }
+}
+
+function toggleMute() {
+  Sound.init();
+  Sound.muted = !Sound.muted;
+  if (Sound.master) Sound.master.gain.value = Sound.muted ? 0 : 0.32;
+}
+
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("againBtn").addEventListener("click", startGame);
+document.getElementById("resumeBtn").addEventListener("click", togglePause);
+document.addEventListener("pointerdown", () => Sound.resume(), { once: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && game.state === "play") togglePause();
+});
+
+/* ------------------------------ attract mode ----------------------------- */
+// Idle stones tumbling behind the title card.
+seedFloaters();
+for (let i = 0; i < 6; i++) stones.push(makeStone(pick([3, 2, 2, 1]), rand(0, W), rand(0, H)));
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
