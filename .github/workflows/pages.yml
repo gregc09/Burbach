@@ -32,6 +32,7 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html _site/
+          cp -R bait-station _site/
           cp -R blasting-kidney-stones _site/
           touch _site/.nojekyll
 
