@@ -1306,66 +1306,108 @@ function drawNest(g) {
 /* ============================ drawing: characters ============================ */
 const FUR = "#b9a89c", FUR_D = "#8b7c72", EAR = "#e7b3ae", TAIL = "#d4a7a2";
 
+/* The mouse wears a real face — a photograph reduced to a sprite, the way
+   arcade cabinets digitised actors in 1993. Everything else stays pixels. */
+const FACE = new Image();
+let faceReady = false;
+FACE.onload = () => { faceReady = true; };
+FACE.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAASxUlEQVR4nF3W6ZNdZ2Gg8ec9+zl37dvdt/e91S2ptVtYciw7gLEty8SBYIMdwIkhQJHKpKiZMBmIIRWSGtcMYaghIVDApBJC7IkJrgo2McbEWLa1y9ZiS7K2bkm93777cvZlPkzNh8nzF/w+PiJJ1oEK1G/RXrpJdW0VPwpQrCw93UUMzSBKJGzbwbc7hAEIYpAkTCuNIktJq9XE9yW8SMGJPQI/RtdMentNsqYmWq0GruPguTHlaomVpTW0KIWEihuFlNt1CFy6CwXyuRy6odCVy1Gu1FBABwxId7Nafpcbl9cxuvP059IkmkA2JSQM8oaJ6CnihxGu6yWtWpVGtUUYCpbrTW4urGCme5EzJqpiYjc6HD5ymbv2bk8Gh7tZWb8GBKJjh2QNC0my2CjVqdsOtWYHSfIxMh55PUE1dLSuDIZjo4AKZEBx6C8O4lc7hJKNRI0wkhBGFqErEMoJQYJm6LQ6bRRdxpL7OXz4NDU/YHrrPpYX1yhduc7myWlef/k1Xjv2Bv/wbYf33/teSqUVHvnoQ8nUptuo1eY5efScqLXaJImB23HRUgY1OyDj+HhRg6WLJfymjUiSFpAAG7B6mcrNFcIkIlA9rJRGoacX0tkExQA1y9rp06hqmlvzNZ784tcpDqb5nc8+zvnLq9iVNe688y7+8qkf8NMLp/j8A79BX7+G79vs2DYHWoze3cfeTdPcXLzGkSMnROQbyIZEIgmEIqELga4o6LpKu9FEgQogQdzCrnYIQgkhSXiOTxL5pDJuohcGQJ5h7czPWd9oUlld40v/+c85cGAPj//Op/ibv/0xA105PvuHv8dX/vjbvHrhNO+b28mHHnmA+Utn+dVr79Bb7GV26yxBELB4a4lib4FdOzcl9ZoQLddGk2VkRUVTBYauIoC0ZaJgX4PYwFsqs3BznmbLxlJNhCySwNJoZTrowwXmz7zIsZ+/xO6tu/neX/097717H4899iA//edn6CnAXQfu4MUf/ysnj7zEjqERPvXJD7F33x4uvX2aYrHI8vIq8/PzPPbwx4hNi/MX3mGwRyWUUwluGlX2RRIpqKYgretISCiGgVg/+3e0mj7VUgnXdZFVhSjwkyCMsFIZpmb6yKhZnvrm3/C5jz/KD7/z9zRtjfGhLkYmi9xaXmfrlq1stCXSuX6yVorjx0/w6OOP8O71BVYWbzI+Pc7JN44zNdlLLpOlb3yCammNcukavf2TlGsykRUiIl2oCiCpyJLAs2PEjWM/IIwDdBLkRMf3AzqOl5QbFVTdYG7LKCdfPYqaNlF9lZeef5WWHfDExw9y7dq76KleRiamsWWDyYkZWu0WMQ5SGPPC8//GzPYd5PMFrKyObticOXqcXFcfu7fvptLYwA8dbLJUvITAiwVJgqpISLqO40RIpmGQS6VIp3LIaQ2h60koQZKoaKhUmk0iJEaGBrl4/CJn3rrBoYN30mxUWC6X2Ty3BU0zGOrN4vg1Op11NNHh8IvPIDWX0UQFQ64jRTbV1SabNt1Gd67AD7//XUzTZHh4iK7uHKbRS0Qusb0MG3VYWrNptmwkL5LpBCbVACrtJNlwoGHL+KgYKY1GdYORiVGoNzl59BRDo1m2bx7ltVd+yb69+0mlAiS5jaQmNJsbZJSA1599jhvHTjHQYyArIZ4n4/s+hUwB3TRx2x2EF3Py1HESBF3ZNOXqOvOrN1mpbyRO0KDL8BkbTKGsVDv4iY/nh4nnS8ROiBPrGBJYhsTSjSYjvXnOXnyLoxdX+cE3Hub4L18FSWd8opfl5SVk1aR9o4HwZH70wx+xWq5w54cPsv/g4/SNbUaRoFJeplOrUcxrBF6TcqNCrtEhCgM0NWDL1ACFwXFyWUG36SeDliISVUe5tRYQSQlqrBEqoMoyUZKQMXWE10ZNWsiSzQs/O8KeyV7ShuCVty/y0COP8NwzP8PUMmipkNWzl9go2QzOzfKZJ/+Cvr378W2JwA2JpQ65bJpECKI4YMt7DrDnzLu8cvR1Ns/OsvuO7QxaOn3WVmQpwEpWSUlroLgojicTygqapiMj0YkidOFjKh7teglDl3jz8HGuXFrki5//OM8991PuuOceqsvLnH/lVbq7sqTyfez+wAfZd/8hcsOT+O2A1lKJ2JQRkkLkhniuT6IkSLKC4zo88JuP8e67C5w7foKx6UGUTIFUtk4mO47sJeBdAOGiSIqEqqiJalighmQli24d1KBKvb6B5kscee0K/V1drC2uMjAwSH6gj6ya4o/+8lsohkb30DjW4AR2pcXajXkSRSWXTqPJKqgmsRRghBGxJPCjALu+QdYaRtc0zpy9zta9i+zYZdBZXUTEKipNLO9cgr8mlImpKVRdQ9NVVEPFNFNYfomNsydotRzaJZeVpQ2WbtU4pV7iT7/+JZY6dZJ0mtTIDLIS0LJt3JurJCJCliIiQyP0HcLAR8sIAi9CNVTCwMdxbAI/ISSgf6ifP//Rv5DPZtk5USBUfDKDw/iOAm0LFBllcHgIXVdJZw30tIWGDtUal9YXWd1Yxy0L5m+VqQAf/b3fIp0r0q+qCCHwyiUKfXkSIdNySliahus6ePUmsmWQ7e1B13QUTUGJYyK7gZAEiRzS8RbZt20zEvCjF4/ypf/0IZwwoONtkDEtqAhQJJS+/mJimVlA8P/y3DqVUhmnElDecKkBT3z4PmYnJ1laXsKuNhGRw41z52lWW4zv2kvfzCTyWJGO62As1Lh07jRLrVV6J6aZ2ncH6ZFRDN3AkGJkxcB2WmxUagyS4woN/MAlUUxqlQ0yo0VIPAjaiWSZuf8PB3DzndO0FjdQIoXFlQYB8OBHDnCzUsGzK0zNjVIYmCPJjLG2vs4vnnuW+bNnyeZ7GJqe4sybZ7lx9QqNSpW1pTqaE1HMp7HbDdrNFqgGuWyRhfkrdGgB0FUoEroBYb0BcjfkNoGSR+Lf5dZOUV1dRiFBU2MOv3mDPdO9DMwUyaVNwnKbP/wP32TTo5/lC8+/zNj7P8b02AwLqytI/cPohSKZ8SGcbB89d3yEbxxd4sBnnuTPfv+rqI026VwXQRKhdGe59757ySt5NMDqMfBsB+EDYQuyBdD8fw9MuPCrlzEwUC2Dqu1gAY//9gcJSzH1pWX+45f/Cq+j89QnP82j+3bz4KH7yE5MEEoGznqDaiWga2Yn2aFhPnD3fh7cczu753ZybbnK5z/+BMK1UYMIybMZnB5FDUP6NQn6B/ESCUVX8Jpr4NYgSlDarkuUCExTo3bp52iJj6+q+HIap15j95YCectgo7RMfnCcrz71GSorZSK3w/ap7Zx44yjGxASFyzad5XX0nl7MkSJDu/fxq3/6CdvyHgc2b2PP7XexUi2zYbvkUgGdZoS92sClye6tm8DaQsd7nVhLEQQyUqOEqksosuIgSzoirlK+fgErlaJZcYhdweRYPzeW6lSqNl3dGbq7utn80HZKZQe70aYR+mQKAyTrJU7duoarCExJwTR0dt1/Dxs7J4kbZbQ4Qs1n2DQ9iqbJrM+fx4wV1uY3uAk8PjsEJOhCwnVDZGUS314g8QWK7JfQLItObZ36xiKFvm6snIXjywx0F1BknaVrS+zfvZmrZ9/EVwN6+2aR9Rw5VSAFMTfq62RNA93MgpzQWVqkp7uL0aEJPKuPOGqThA6Sn9BpVlBkk1ajwabxEfqB8c0jgIcsm0ixgxNXkOQcrXYRKXIWsOtv065ew7E7iMglbclEUYAXCoYmezh+4SJ+aGN1pREO2FWPHjVNyrVZPHKEptMiSaloloFtu/iJx9JbJ+hcfod0XiGJIxTNxFIV8DzoOOiKxtXVBWJgctMWcALcyCNBwmk0kSSVWJ9BqdaXRRxGSdy2yaoKyws3GRieRO3OsuF5DI4U+eXrF/A6IYos4dsbJLKE1FziyC/+hbWWzT0f/W3CJKR3fBSaNkP9Ba6eOsYLf/0t7vjN9zE8MU6i5+hE4HfquKFHpVnhnedfZH/KpH+4B9ptRJjgBTEZYRAnIVFkCsV1PIRQkYWO0BT8xRrXy+fYvHUrl069yeBwkU5LYmPpJrKcgJenUHM5dv4CxnAXW0dH+Ouv/QnbZnbDSom2G/DakRPc8YH3s2VuEy8/+zT3H/ow6UIvnioThdAJfDJGzFShyL4De1BzKp1QQBShComW08I0EuxOAyXxY5BdNGFguzYpw+KlV4+wP5tmbHwMTfVQLJX5jSZFxcWpN7i8fIrIyjLcNUlX7yh/8NSTnDt8gu//8PvsuesePvG1P0XrHaR0/g2ka1c58q8vMXP7ToSSwws7jIzOIssDnM2YNMM0wpPw3SaG5KPKUKvZ9A9liSUfxQ8lktATeV1OJBSEorB9dgvf+vozfPKR+5ibHWJucgTX7qD1SLSaNqWgzda+zQzmi1w5/SZ+q8P40Cbu+y9PofV1kyQKztI603vupChCfva33+XyxbcYndqDS8zQjhn0XYeIgbPPf4NyaYXR/mHiOAZkIr9DE02YpoHiByDHMrEaY6gybtwhl+8l8mB1tcLU2CCzM72sVsrcNjuHnhP82sGD/Oq1d7j/iS/z3x57gNF8zMtvvMKzP/1HenoM2mHItrk9fO8nr7D/jp186uGDqMKi47r4iYwQJjHw2LZJRgoGZ67X2arrNBo1hoRC4LZxGjKWLKHIsoYq6RhCIMIIr9NGCIPNW4fZsWuOd8+/jRLHEMeQzuNUKlRsn4c+fC9/thZBSmbH7z7Iw7ffSbveJp2fxqndYvXqImOr8LtfeIK83KZya5lOy2Nw0xTHTl8B4A++8DFuXL1CV9ckTtsjSVwMRaDGCZodkVgCRZNl1CQA3xflWjVxnBgrlVAcKKIrBrlsP02nRWXlAuX1Gum0zvLCLTw74tEH93D4+Vd59o+/zcyWf8PsK7Lltl2cfWeBnCH4zn//Kn7c5Or5BRLbwQl9dMXghRd+AsD+9+zgH59+ht964iHWS6sEvo+qCOLQE01PQyFB0uIQXVJoN1x6enqFY3dIZ1T6hrqpdlpUQpfxXXNoOZnnf/E6hZ5RfLdOu7LEur3CtrvmuPvuWbZt6mbGknDePM1tw2m27ByhtHGV5VvXUBMJRVYQGQUn9mmVVvngdJGa18QVGqmMTm3pPHIUEWiSaLkOrm1jt+pIIvbQpIiaUyGTS9Gw28JQdHJJiGEotCMXu9Pk3vvv4+S5Fc5evMHs9kls20ZTTCTTQO4usFJtcbm0SokmnbiKFwckZoylGSiyhqxqVGsuViHN+JDOpz/3MMePnidlpgh8G7vjgixEStNx6k2kOIYkQPGcBvlML1YmRbO+giYkFtdXyVgFuqw0WSmivryOoUr8+t4xnvyfT/Pi//qvDAwGBIlKqlAkl5LJ/NogkpJD1SyCxEfqOJDYNNwysixRqTYZmhxDl01GBnPceWAb//vpF9ixYxvrlRVMM4Xn2NjVFqPDw5w9+Tp77t6D5DkuvuOiawaOl6AbWWqlkjh26iiGkBjp7SZnwOLCVTJpkyEVPvLpL1Oue/jNCrHnYkRpLDmLqgo0QyKXzaF1Z1FlE8+LuH79CoEKfRNjdIIIXTVRtSyVSojjBqzPL2JlLKFkTS5dvsDAUD+LKytUGnUUKdGoVtZJ57uQLQ09lWdmJs9bF86KoydP8oH3HkjOvHOCnt5BLl8+x+27Jnju1ALf/e7f8aGDB/Dfvkb/6BTjE6P/90hyOUQcE/hwfeEK8ysLbNq+jdHpcRJ0BC7ILVJpg2J/gY4bimIsc/XaCuOTc6iSQtu2ufu+Q9RL6yi+59HoVJAyMDU7yM1L5+nKZvngoQf4p3/+BcWevDB0PVlcXmdoaJj1UoctQ0VUw8PxImrtMgvHLnL0xRoi1gEdwxLYoUxucoD3feSjdHV3IyuQBCFhGGGm8pBozMzOiobXIdU3iLNa5TvfO8onPnEQt7bAlm2bEcyhWJaFIfeSSDq+L9E93MOF1evokszUeB9xKsbzHFEqryVZs4gnC0JJIYhChJ6jkFPYcft2/MAhdG0S10XICVpuiMm9d2FZFmGQgKIQxQEKCdlCkVu3LorNO8Y5duI0IvbIZhL2Hpjji1/5Gk//+Jt4wWYOPfxZJM9zEVGAFUA6rdLTlyJrZijf2MBUFHbu2I4cCuyOLZLIF61WS3heQE43aW5UySlpKhsNurNFurv66B4YpdgzSqbYjd2OcNsucgIgkRCLxFBFobdPLF9fJPKz3Pu+Q8xsHePX77ufz/3J73PyxjXWnUlm7nyMa6trKNVymd6eHF5s48QuhXQepU/BabpM79yF60VkshkGRvpIPIXeri6cwBO2SFhcXWZsUzHxbQ+vHSA0Gc3MIFSBrJlIhIRxIpREQYpDBBJxkpDp7qWrOMAffeV/cPf79+IkOj958TBjA5PcWFrlzKV5pkZ7eM/Oe/g/ddrit/VgVhIAAAAASUVORK5CYII=";
+
+function drawFace(cx, cy, size, rot) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rot) ctx.rotate(rot);
+  if (faceReady) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(FACE, -size / 2, -size / 2, size, size);
+    ctx.imageSmoothingEnabled = false;
+  } else {
+    ctx.fillStyle = FUR;
+    ctx.beginPath(); ctx.arc(0, 0, size / 2, 0, 6.3); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawEars(hx, hy, r) {
+  ctx.save();
+  ctx.translate(hx, hy - r - 1);
+  ctx.scale(1, .82);
+  ctx.fillStyle = EAR;
+  ctx.beginPath(); ctx.arc(-r - 2, 0, r, 0, 6.3); ctx.fill();
+  ctx.beginPath(); ctx.arc(r + 2, 0, r, 0, 6.3); ctx.fill();
+  ctx.fillStyle = "#c2807f";
+  ctx.beginPath(); ctx.arc(-r - 2, 1, r * .5, 0, 6.3); ctx.fill();
+  ctx.beginPath(); ctx.arc(r + 2, 1, r * .5, 0, 6.3); ctx.fill();
+  ctx.restore();
+}
+// a rounded pixel silhouette: corners inset row by row, lit on top, shaded below
+function furBlob(cx, top, w, h) {
+  for (let r = 0; r < h; r++) {
+    const inset = r === 0 ? 3 : r === 1 ? 1 : r === h - 1 ? 2 : 0;
+    const ww = w - inset * 2;
+    px(Math.round(cx - ww / 2), top + r, ww, 1,
+      r <= 1 ? "#c6b7ac" : r === h - 1 ? FUR_D : FUR);
+  }
+}
+function drawTail(bx, by, d, wig) {
+  px(bx, by + wig, 6, 1, TAIL);
+  px(bx - d * 5, by - 1 + wig, 4, 1, TAIL);
+  px(bx - d * 8, by - 2 + wig, 3, 1, TAIL);
+  px(bx - d * 9, by - 4 + wig, 2, 2, TAIL);
+}
+
 function drawMouse() {
   const p = player;
   const x = Math.round(p.x), y = Math.round(p.y);
+  const HEAD = 16;
+
   if (S.mode === "dying") {
     const t = S.t;
+    const hop = Math.max(0, 34 * t - 36 * t * t);
     ctx.save();
-    ctx.translate(x, y - 6 - Math.max(0, 26 * t - 30 * t * t));
-    ctx.rotate(t * 7);
-    px(-5, -4, 10, 7, FUR);
-    px(-5, -4, 10, 1, "#cbbcb1");
-    px(-2, -1, 2, 1, "#2a1b20");
-    px(2, -1, 2, 1, "#2a1b20");
-    px(-8, -2, 3, 1, TAIL);
+    ctx.translate(x, y - 12 - hop);
+    ctx.rotate(t * 6);
+    furBlob(0, 2, 15, 7);
+    px(-11, 4, 5, 1, TAIL);
+    drawEars(0, -4, 5);
+    drawFace(0, -4, HEAD, 0);
     ctx.restore();
     return;
   }
-  const climbing = p.state === "climb";
-  const walk = Math.floor(p.walkT) % 2;
-  if (climbing) {
+
+  if (p.state === "climb") {
     const sway = Math.sin(p.walkT * 1.6) * 1;
-    px(x - 4, y - 12, 8, 11, FUR);
-    px(x - 4, y - 12, 8, 1, "#cbbcb1");
-    px(x - 5, y - 13, 3, 3, EAR); px(x + 2, y - 13, 3, 3, EAR);
-    px(x - 4, y - 12, 2, 2, "#cbbcb1");
-    px(x - 2, y - 9, 1, 1, "#2a1b20"); px(x + 1, y - 9, 1, 1, "#2a1b20");
-    px(x - 1, y - 7, 2, 1, "#e0908f");
-    px(x - 6 + (walk ? 0 : 1), y - 10, 2, 2, FUR_D);
-    px(x + 4 - (walk ? 0 : 1), y - 8, 2, 2, FUR_D);
-    px(x - 1, y - 1, 2, 5 + sway, TAIL);
-    if (p.wool > 0) drawWoolWad(x, y - 14);
+    const grip = Math.floor(p.walkT) % 2;
+    furBlob(x, y - 9, 13, 9);
+    px(x - 9, y - (grip ? 12 : 8), 4, 2, FUR_D);
+    px(x + 5, y - (grip ? 8 : 12), 4, 2, FUR_D);
+    px(x - 5, y - 2, 4, 2, FUR_D);
+    px(x + 1, y - 2, 4, 2, FUR_D);
+    px(x - 1, y - 1, 2, 4 + sway, TAIL);
+    px(x - 1 + Math.round(sway), y + 3, 2, 2, TAIL);
+    drawEars(x, y - 15, 5);
+    drawFace(x, y - 15, HEAD, 0);
+    if (p.wool > 0) drawWoolWad(x + 10, y - 10);
     return;
   }
+
   const d = p.dir;
-  const bob = p.state === "air" ? -1 : 0;
-  px(x - 5 * d - (d > 0 ? 0 : 0), y - 7 + bob, 10, 7, FUR);
-  px(x - 5, y - 7 + bob, 10, 1, "#cbbcb1");
-  px(x - 5, y - 2 + bob, 10, 2, FUR_D);
-  const hx = x + d * 4;
-  px(hx - 2, y - 9 + bob, 5, 6, FUR);
-  px(hx - 2, y - 9 + bob, 5, 1, "#cbbcb1");
-  px(hx - 3 + (d > 0 ? 0 : 2), y - 12 + bob, 3, 3, EAR);
-  px(hx + d * 1, y - 7 + bob, 1, 1, "#2a1b20");
-  px(hx + d * 3, y - 5 + bob, 1, 1, "#e0908f");
-  px(hx + d * 2, y - 4 + bob, 2, 1, "#c9b7ab");
-  const tx = x - d * 6;
-  const wig = p.state === "air" ? -2 : (walk ? -1 : 0);
-  px(tx - (d > 0 ? 3 : 0), y - 5 + bob + wig, 4, 1, TAIL);
-  px(tx - d * 3 - (d > 0 ? 1 : 0), y - 7 + bob + wig, 2, 2, TAIL);
-  if (p.state === "air") {
-    px(x - 4, y - 1, 3, 2, FUR_D); px(x + 2, y - 1, 3, 2, FUR_D);
-  } else if (walk) {
-    px(x - 4, y - 1, 2, 1, FUR_D); px(x + 2, y - 1, 3, 1, FUR_D);
-  } else {
-    px(x - 3, y - 1, 3, 1, FUR_D); px(x + 3, y - 1, 2, 1, FUR_D);
+  const walk = Math.floor(p.walkT) % 2;
+  const air = p.state === "air";
+  const by = y - 8 + (air ? -1 : 0);
+  const wig = air ? -2 : (walk ? -1 : 0);
+  drawTail(x - d * 7 - (d > 0 ? 1 : 4), by + 5, d, wig);
+  furBlob(x, by, 17, 8);
+  if (air) { px(x - 6, y - 2, 4, 2, FUR_D); px(x + 2, y - 2, 4, 2, FUR_D); }
+  else if (walk) { px(x - 7, y - 2, 4, 2, FUR_D); px(x + 3, y - 2, 3, 2, FUR_D); }
+  else { px(x - 6, y - 2, 4, 2, FUR_D); px(x + 2, y - 2, 4, 2, FUR_D); }
+  const hx = x + d * 2, hy = by - 6;
+  drawEars(hx, hy, 5);
+  drawFace(hx, hy, HEAD, 0);
+  if (p.chewT > 0 && Math.random() < .6) {
+    px(hx + d * 8, hy + 7, 2, 2, "#2fbfb2");
+    px(hx + d * 11, hy + 4, 1, 1, "#6fe0d6");
   }
-  if (p.chewT > 0) {
-    px(hx + d * 3, y - 6 + bob, 2, 1, "#ffffff");
-    if (Math.random() < .5) px(hx + d * 5, y - 8 + bob, 1, 1, "#e8c33d");
-  }
-  if (p.wool > 0) drawWoolWad(hx + d * 4, y - 8 + bob);
+  if (p.wool > 0) drawWoolWad(hx + d * 9, hy + 6);
 }
 function drawWoolWad(x, y) {
   const blink = player.wool < 2 && Math.sin(S.t * 18) < 0;
@@ -1373,6 +1415,8 @@ function drawWoolWad(x, y) {
   px(x - 3, y - 3, 6, 6, "#8e979b");
   px(x - 2, y - 3, 4, 2, "#cfd6d8");
   px(x - 3, y + 1, 2, 1, "#6d7679");
+  px(x - 5, y, 2, 1, "#8e979b");
+  px(x + 3, y - 1, 2, 1, "#8e979b");
 }
 
 function drawWalker(w) {
@@ -1464,11 +1508,9 @@ function drawBoss() {
 
 /* ============================ HUD + render ============================ */
 function drawMouseIcon(x, y) {
-  px(x, y + 1, 6, 4, FUR);
-  px(x, y + 1, 6, 1, "#cbbcb1");
-  px(x + 5, y, 2, 2, EAR);
-  px(x + 4, y + 2, 1, 1, "#2a1b20");
-  px(x - 2, y + 2, 2, 1, TAIL);
+  px(x, y, 2, 2, EAR);
+  px(x + 8, y, 2, 2, EAR);
+  drawFace(x + 5, y + 5, 10, 0);
 }
 function drawHUD() {
   px(0, 0, LW, 34, "rgba(10,8,11,.74)");
