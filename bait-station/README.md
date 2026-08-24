@@ -4,9 +4,16 @@ A Donkey Kong-style single-screen climber played from three inches off the
 floor. You are a house mouse. The house has been treated. Climb it anyway —
 the last of the litter is at the top of each floor.
 
+The mouse wears a real face: a photograph cropped to a circle, reduced to a
+40-pixel sprite and drawn on a pixel-art body, the way arcade cabinets
+digitised actors in the early nineties. It is embedded in the page as a data
+URI, so the game is still one file with nothing to fetch. Swap it by replacing
+the base64 string assigned to `FACE.src`; anything roughly square and centred
+on a face works, and the sprite is drawn at 16 logical pixels, so crop tight.
+
 Single file, no build step, no dependencies, no external assets except the two
-webfonts. All graphics are canvas pixel art, all sound is synthesized with the
-Web Audio API.
+webfonts. Everything else is canvas pixel art, and all sound is synthesized
+with the Web Audio API.
 
 ## Play
 
