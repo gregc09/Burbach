@@ -1,0 +1,2251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Hook Echo</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+  /* A single committed world: a night chase under a supercell. No light theme
+     on purpose -- every colour is painted, nothing borrows the host ground. */
+  :root {
+    --sky:     #0d1512;   /* wet olive-black: neutrals biased green, not grey */
+    --sky-lo:  #060a09;
+    --asphalt: #1b211f;
+    --radar:   #7ef0b0;   /* radar sweep green -- the primary ink */
+    --radar-lo:#2f6a4e;
+    --warn:    #ffb703;   /* NWS warning amber -- the one bold note */
+    --siren:   #ff4d2e;   /* danger, semantic only */
+    --hail:    #e8f2ee;
+    --line:    rgba(126, 240, 176, .20);
+    --display: "Saira Condensed", "Arial Narrow", system-ui, sans-serif;
+    --mono:    "IBM Plex Mono", "Courier New", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--sky);
+    color: var(--radar);
+    font-family: var(--mono);
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap { position: fixed; inset: 0; }
+  canvas#c { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  /* ---------------------------- bulletin HUD ----------------------------- */
+  #hud {
+    position: absolute; left: 0; right: 0; top: 0;
+    display: flex; align-items: stretch; gap: 1px;
+    background: rgba(6, 10, 9, .94);
+    border-bottom: 1px solid var(--line);
+    font-size: 11px; letter-spacing: .12em;
+    pointer-events: none; z-index: 3;
+  }
+  #hud[hidden] { display: none; }
+  .cell { padding: 7px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .cell + .cell { border-left: 1px solid var(--line); }
+  .cap { font-size: 9px; letter-spacing: .26em; color: var(--radar-lo); }
+  .val { font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: .04em; color: var(--hail); line-height: 1; }
+  .val.num { font-variant-numeric: tabular-nums; }
+
+  /* the EF badge: warning-placard treatment */
+  #efCell { background: var(--warn); color: #12100a; align-items: center; justify-content: center; padding: 7px 14px; }
+  #efCell .cap { color: rgba(18, 16, 10, .65); }
+  #efCell .val { color: #12100a; font-size: 26px; }
+
+  /* the hero element -- lift */
+  #liftCell { flex: 1 1 auto; min-width: 0; }
+  #liftBar {
+    position: relative; height: 12px; border: 1px solid var(--line);
+    background: rgba(126, 240, 176, .06); overflow: hidden;
+  }
+  #liftFill {
+    position: absolute; inset: 0 auto 0 0; width: 0%;
+    background: linear-gradient(90deg, var(--radar), var(--warn) 62%, var(--siren));
+    transition: width .08s linear;
+  }
+  #liftTicks { position: absolute; inset: 0; }
+  #liftTicks i { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(6, 10, 9, .55); }
+  #liftCell.warn .cap { color: var(--warn); }
+  #liftCell.crit .cap { color: var(--siren); }
+  #liftCell.crit #liftBar { animation: pulse .38s steps(2, jump-none) infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 2px rgba(255, 77, 46, .55); } }
+
+  #dmgBar { width: 62px; height: 12px; border: 1px solid var(--line); position: relative; background: rgba(126, 240, 176, .06); }
+  #dmgFill { position: absolute; inset: 0 auto 0 0; width: 0%; background: var(--siren); }
+
+  .dots { display: flex; gap: 3px; align-items: center; height: 12px; }
+  .dots span { width: 7px; height: 12px; background: var(--radar); }
+  .dots span.spent { background: rgba(126, 240, 176, .17); }
+
+  /* ------------------------- radar + radio strip ------------------------- */
+  #radarBox {
+    position: absolute; left: 10px; bottom: 10px; z-index: 3;
+    border: 1px solid var(--line); background: rgba(6, 10, 9, .74);
+    padding: 5px; pointer-events: none;
+  }
+  #radarBox[hidden] { display: none; }
+  #radar { display: block; width: 104px; height: 104px; }
+  #radarBox .cap { margin-top: 4px; text-align: center; }
+
+  #radio {
+    position: absolute; left: 0; right: 0; bottom: 96px; z-index: 3;
+    text-align: center; padding: 0 18px; pointer-events: none;
+    font-size: clamp(11px, 2.7vw, 14px); letter-spacing: .06em;
+    color: var(--hail); text-shadow: 0 1px 10px rgba(6, 10, 9, .95);
+    opacity: 0; transition: opacity .25s ease;
+  }
+  #radio.on { opacity: 1; }
+  #radio b { color: var(--warn); font-weight: 600; letter-spacing: .18em; font-size: .82em; }
+
+  /* ------------------------------ overlays ------------------------------- */
+  .screen {
+    position: absolute; inset: 0; z-index: 6;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 26px;
+    background:
+      radial-gradient(ellipse at 50% 38%, rgba(20, 34, 28, .90), rgba(4, 7, 6, .96) 72%);
+  }
+  .screen[hidden] { display: none; }
+  .plate {
+    width: 100%; max-width: 33rem;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(27, 33, 31, .92), rgba(9, 14, 12, .92));
+    padding: 26px 24px 24px;
+  }
+  .rule {
+    height: 6px; margin: 0 0 20px;
+    background: repeating-linear-gradient(135deg, var(--warn) 0 9px, #12100a 9px 18px);
+  }
+  h1 {
+    margin: 0; font-family: var(--display); font-weight: 800;
+    font-size: clamp(40px, 11vw, 82px); line-height: .92;
+    letter-spacing: .02em; color: var(--hail); text-wrap: balance;
+  }
+  h1 em { font-style: normal; color: var(--warn); }
+  h2.bad { color: var(--siren); }
+  h2 {
+    margin: 0 0 10px; font-family: var(--display); font-weight: 800;
+    font-size: clamp(26px, 7vw, 44px); letter-spacing: .03em; color: var(--warn);
+    text-wrap: balance; line-height: 1;
+  }
+  .sub { margin: 10px 0 0; font-size: clamp(10px, 2.5vw, 12px); letter-spacing: .3em; color: var(--radar); }
+  .body { margin: 18px auto 0; max-width: 46ch; text-align: left; font-size: clamp(12px, 2.9vw, 14px); line-height: 1.75; color: var(--hail); letter-spacing: .01em; }
+  .body em { font-style: normal; color: var(--warn); }
+  .keys {
+    display: grid; grid-template-columns: auto 1fr; gap: 7px 16px;
+    margin: 22px auto 0; max-width: 26rem; text-align: left;
+    font-size: clamp(11px, 2.6vw, 13px);
+  }
+  .keys dt { color: var(--warn); letter-spacing: .1em; }
+  .keys dd { margin: 0; color: var(--hail); opacity: .88; }
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+    gap: 12px; margin: 22px 0 0; text-align: left;
+  }
+  .stat { border-left: 2px solid var(--radar-lo); padding-left: 10px; }
+  .stat .cap { display: block; margin-bottom: 3px; }
+  .stat .val { font-size: 21px; font-variant-numeric: tabular-nums; }
+  .go {
+    margin: 24px 0 0; font-size: clamp(11px, 2.7vw, 13px); letter-spacing: .24em; color: var(--warn);
+    animation: blink 1.15s steps(2, jump-none) infinite;
+  }
+  .foot { margin: 16px 0 0; font-size: 10px; letter-spacing: .2em; color: var(--radar-lo); }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* EF intro card: the placard, full width, no chrome competing with it */
+  /* the title is the one screen where the storm behind it is the point */
+  #titleScreen {
+    background: radial-gradient(ellipse at 50% 34%, rgba(13, 22, 18, .40), rgba(4, 7, 6, .78) 74%);
+  }
+  #cardScreen .plate { max-width: 30rem; }
+  #efBig { font-family: var(--display); font-weight: 800; font-size: clamp(78px, 24vw, 168px); line-height: .8; color: var(--warn); letter-spacing: -.01em; }
+  #efName { margin: 12px 0 0; font-family: var(--display); font-weight: 600; font-size: clamp(19px, 5vw, 30px); letter-spacing: .16em; color: var(--hail); }
+
+  /* ---------------------------- touch controls --------------------------- */
+  #pad { position: absolute; inset: auto 0 0 0; z-index: 4; display: none; padding: 12px; gap: 10px; }
+  #pad.on { display: flex; align-items: flex-end; justify-content: space-between; }
+  .pgroup { display: flex; gap: 10px; }
+  .btn {
+    width: 62px; height: 56px; border: 1px solid var(--line);
+    background: rgba(6, 10, 9, .66); color: var(--radar);
+    font-family: var(--display); font-weight: 800; font-size: 13px; letter-spacing: .1em;
+    display: flex; align-items: center; justify-content: center; border-radius: 2px;
+  }
+  .btn.wide { width: 78px; }
+  .btn.held { background: var(--warn); color: #12100a; border-color: var(--warn); }
+
+  button.link {
+    appearance: none; border: 1px solid var(--line); background: transparent;
+    color: var(--warn); font-family: var(--mono); font-size: 11px; letter-spacing: .22em;
+    padding: 10px 20px; margin: 22px 4px 0; cursor: pointer;
+  }
+  button.link:hover { border-color: var(--warn); }
+  button.link:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+
+  @media (max-width: 560px) {
+    #hud { font-size: 10px; flex-wrap: wrap; }
+    .cell { padding: 5px 8px; }
+    #hideSmall { display: none; }
+    #radar { width: 78px; height: 78px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .go, #liftCell.crit #liftBar { animation: none; }
+    #liftFill { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+
+  <div id="hud" hidden>
+    <div class="cell" id="efCell"><span class="cap">RATING</span><span class="val" id="efVal">EF1</span></div>
+    <div class="cell" id="liftCell">
+      <span class="cap" id="liftCap">LIFT</span>
+      <div id="liftBar">
+        <div id="liftFill"></div>
+        <div id="liftTicks"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i></div>
+      </div>
+    </div>
+    <div class="cell"><span class="cap">DAMAGE</span><div id="dmgBar"><div id="dmgFill"></div></div></div>
+    <div class="cell" id="hideSmall"><span class="cap">PROBES</span><div class="dots" id="probeDots"></div></div>
+    <div class="cell"><span class="cap">ABOARD</span><span class="val num" id="ridersVal">0</span></div>
+    <div class="cell"><span class="cap">SHELTER</span><span class="val num" id="distVal">0</span></div>
+    <div class="cell"><span class="cap">SCORE</span><span class="val num" id="scoreVal">0</span></div>
+    <div class="cell"><span class="cap">UNITS</span><span class="val num" id="livesVal">3</span></div>
+  </div>
+
+  <div id="radarBox" hidden>
+    <canvas id="radar" width="208" height="208"></canvas>
+    <div class="cap">REFLECTIVITY</div>
+  </div>
+
+  <p id="radio"><b id="radioWho">NATALIE</b> <span id="radioText"></span></p>
+
+  <div id="pad">
+    <div class="pgroup">
+      <div class="btn" id="bLeft" aria-label="steer left">&#9664;</div>
+      <div class="btn" id="bRight" aria-label="steer right">&#9654;</div>
+    </div>
+    <div class="pgroup">
+      <div class="btn wide" id="bProbe" aria-label="deploy probe">PROBE</div>
+      <div class="btn" id="bBrake" aria-label="brake">BRAKE</div>
+      <div class="btn wide held" id="bGas" aria-label="throttle">GAS</div>
+    </div>
+  </div>
+
+  <!-- title -->
+  <div class="screen" id="titleScreen">
+    <div class="plate">
+      <div class="rule"></div>
+      <h1>HOOK <em>ECHO</em></h1>
+      <p class="sub">NATALIE &middot; STORM CHASE UNIT 7</p>
+      <p class="body">Five tornadoes are on the ground over five nights, and each
+        one is worse than the last. Get the truck across town to the shelter
+        before the inflow takes you off the pavement &mdash; and drop your
+        sensor probes close enough to be worth the trip.</p>
+      <dl class="keys">
+        <dt>&larr; &rarr; / A D</dt><dd>steer</dd>
+        <dt>&uarr; / W</dt><dd>throttle</dd>
+        <dt>&darr; / S</dt><dd>brake &mdash; and reverse</dd>
+        <dt>SPACE</dt><dd>deploy a probe</dd>
+        <dt>P / ESC</dt><dd>pause</dd>
+        <dt>M</dt><dd>mute</dd>
+      </dl>
+      <p class="go">PRESS ENTER TO ROLL</p>
+      <p class="foot" id="bestFoot"></p>
+    </div>
+  </div>
+
+  <!-- EF placard between levels -->
+  <div class="screen" id="cardScreen" hidden>
+    <div class="plate">
+      <div class="rule"></div>
+      <p class="sub">TORNADO WARNING &middot; UNIT 7 RESPOND</p>
+      <div id="efBig">EF1</div>
+      <p id="efName">THE ROPE</p>
+      <p class="body" id="efBrief"></p>
+      <p class="go">PRESS ENTER</p>
+    </div>
+  </div>
+
+  <!-- outcome -->
+  <div class="screen" id="overScreen" hidden>
+    <div class="plate">
+      <div class="rule"></div>
+      <h2 id="overTitle">PULLED UP</h2>
+      <p class="body" id="overBody"></p>
+      <div class="stats" id="overStats"></div>
+      <p class="go" id="overGo">PRESS ENTER</p>
+    </div>
+  </div>
+
+  <!-- pause -->
+  <div class="screen" id="pauseScreen" hidden>
+    <div class="plate">
+      <div class="rule"></div>
+      <h2>HELD</h2>
+      <p class="body">The storm waits. Press <em>P</em> to keep going.</p>
+      <button class="link" id="quitBtn" type="button">ABANDON CHASE</button>
+    </div>
+  </div>
+</div>
+<script>
+/* =========================================================================
+   HOOK ECHO
+   Top-down storm chase. Drive the town, keep the truck on the ground.
+
+   Order below: canvas, utils, audio, input, level data, storage, state,
+   town generation, truck, tornadoes, debris, probes, survivors, weather,
+   radio, camera, collision, HUD, radar, drawing, level flow, main loop.
+   ========================================================================= */
+
+/* ------------------------------- canvas ---------------------------------- */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* -------------------------------- utils ---------------------------------- */
+const TAU = Math.PI * 2;
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const pick = arr => arr[randInt(0, arr.length - 1)];
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const commas = n => Math.round(n).toLocaleString("en-US");
+
+/* -------------------------------- audio ----------------------------------
+   Everything is synthesized. The roar is one persistent noise chain whose
+   gain and cutoff track the nearest funnel -- proximity you can hear before
+   you can see it through the rain. */
+const Sound = {
+  ctx: null, master: null, muted: false, ready: false,
+  noiseBuf: null, roarGain: null, roarFilt: null, engGain: null, engOsc: null,
+
+  init() {
+    if (this.ready) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master.connect(this.ctx.destination);
+
+    /* one second of noise, reused by every noise voice */
+    const len = Math.floor(this.ctx.sampleRate);
+    this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++) {
+      const white = Math.random() * 2 - 1;
+      last = (last + 0.02 * white) / 1.02;   /* brown-ish: more weight down low */
+      d[i] = last * 3.2;
+    }
+
+    /* the roar */
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    this.roarFilt = this.ctx.createBiquadFilter();
+    this.roarFilt.type = "lowpass";
+    this.roarFilt.frequency.value = 220;
+    this.roarFilt.Q.value = 1.4;
+    this.roarGain = this.ctx.createGain();
+    this.roarGain.gain.value = 0;
+    src.connect(this.roarFilt).connect(this.roarGain).connect(this.master);
+    src.start();
+
+    /* the engine */
+    this.engOsc = this.ctx.createOscillator();
+    this.engOsc.type = "sawtooth";
+    this.engOsc.frequency.value = 60;
+    const engFilt = this.ctx.createBiquadFilter();
+    engFilt.type = "lowpass";
+    engFilt.frequency.value = 340;
+    this.engGain = this.ctx.createGain();
+    this.engGain.gain.value = 0;
+    this.engOsc.connect(engFilt).connect(this.engGain).connect(this.master);
+    this.engOsc.start();
+
+    this.ready = true;
+  },
+
+  resume() {
+    if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+  },
+
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.value = m ? 0 : 0.9;
+  },
+
+  /* called every frame with 0..1 proximity and 0..1 engine load */
+  ambient(prox, load, moving) {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+    this.roarGain.gain.setTargetAtTime(0.62 * prox * prox, t, 0.18);
+    this.roarFilt.frequency.setTargetAtTime(180 + 900 * prox, t, 0.22);
+    this.engGain.gain.setTargetAtTime(moving ? 0.05 + 0.07 * load : 0.02, t, 0.1);
+    this.engOsc.frequency.setTargetAtTime(52 + 78 * load, t, 0.09);
+  },
+
+  tone(freq, freq2, dur, type = "square", vol = 0.18) {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freq2 && freq2 !== freq) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq2), t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  },
+
+  noise(dur, cutFrom, cutTo, vol = 0.3, type = "lowpass") {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+    const s = this.ctx.createBufferSource();
+    s.buffer = this.noiseBuf;
+    s.loop = true;
+    const f = this.ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.setValueAtTime(cutFrom, t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(40, cutTo), t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f).connect(g).connect(this.master);
+    s.start(t);
+    s.stop(t + dur + 0.03);
+  },
+
+  siren() {
+    if (!this.ready) return;
+    /* the two-tone civil defence wail, three rises */
+    for (let i = 0; i < 3; i++) {
+      const t = this.ctx.currentTime + i * 1.15;
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(330, t);
+      o.frequency.linearRampToValueAtTime(680, t + 0.55);
+      o.frequency.linearRampToValueAtTime(340, t + 1.1);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.11, t + 0.12);
+      g.gain.setValueAtTime(0.11, t + 0.9);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.12);
+      o.connect(g).connect(this.master);
+      o.start(t);
+      o.stop(t + 1.15);
+    }
+  },
+
+  thunder()  { this.noise(rand(1.1, 1.9), rand(340, 620), 45, 0.34); },
+  probe()    { this.tone(880, 1760, 0.14, "square", 0.14); },
+  sample()   { this.tone(660, 1320, 0.1, "square", 0.16);
+               setTimeout(() => this.tone(990, 1980, 0.16, "square", 0.16), 110); },
+  board()    { this.tone(520, 780, 0.09, "triangle", 0.16);
+               setTimeout(() => this.tone(780, 1040, 0.12, "triangle", 0.14), 90); },
+  thud()     { this.noise(0.22, 900, 90, 0.36); this.tone(90, 44, 0.18, "square", 0.12); },
+  scrape()   { this.noise(0.3, 2600, 800, 0.16, "bandpass"); },
+  lift()     { this.noise(2.1, 200, 2600, 0.42, "bandpass");
+               this.tone(120, 900, 2.0, "sawtooth", 0.1); },
+  wreck()    { this.noise(0.9, 1800, 60, 0.44); this.tone(160, 40, 0.7, "square", 0.16); },
+  clear()    { [523, 659, 784, 1046].forEach((f, i) =>
+                 setTimeout(() => this.tone(f, f, 0.2, "triangle", 0.15), i * 110)); },
+};
+
+/* -------------------------------- input ---------------------------------- */
+const keys = Object.create(null);
+const KEYMAP = {
+  ArrowLeft: "left", KeyA: "left",
+  ArrowRight: "right", KeyD: "right",
+  ArrowUp: "gas", KeyW: "gas",
+  ArrowDown: "brake", KeyS: "brake",
+  Space: "probe",
+};
+
+window.addEventListener("keydown", e => {
+  if (e.code === "Enter" || e.code === "NumpadEnter") { e.preventDefault(); onConfirm(); return; }
+  if (e.code === "KeyP" || e.code === "Escape") { e.preventDefault(); togglePause(); return; }
+  if (e.code === "KeyM") { Sound.setMuted(!Sound.muted); flashRadio("DISPATCH", Sound.muted ? "radio silence" : "radio back up"); return; }
+  const k = KEYMAP[e.code];
+  if (k) {
+    e.preventDefault();
+    if (k === "probe" && !keys.probe) dropProbe();
+    keys[k] = true;
+  }
+});
+window.addEventListener("keyup", e => {
+  const k = KEYMAP[e.code];
+  if (k) { e.preventDefault(); keys[k] = false; }
+});
+window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+
+const isTouch = matchMedia("(hover: none) and (pointer: coarse)").matches;
+
+function bindPad(id, key, onPress) {
+  const el = document.getElementById(id);
+  const down = e => {
+    e.preventDefault();
+    Sound.init(); Sound.resume();
+    keys[key] = true;
+    el.classList.add("held");
+    if (onPress) onPress();
+  };
+  const up = e => { e.preventDefault(); keys[key] = false; el.classList.remove("held"); };
+  el.addEventListener("touchstart", down, { passive: false });
+  el.addEventListener("touchend", up);
+  el.addEventListener("touchcancel", up);
+  el.addEventListener("mousedown", down);
+  el.addEventListener("mouseup", up);
+  el.addEventListener("mouseleave", up);
+}
+
+if (isTouch) {
+  document.getElementById("pad").classList.add("on");
+  bindPad("bLeft", "left");
+  bindPad("bRight", "right");
+  bindPad("bBrake", "brake");
+  bindPad("bProbe", "probe", dropProbe);
+  /* on a phone the throttle is held down for you -- one less thumb */
+  keys.gas = true;
+  const gas = document.getElementById("bGas");
+  gas.addEventListener("touchstart", e => {
+    e.preventDefault();
+    keys.gas = !keys.gas;
+    gas.classList.toggle("held", keys.gas);
+  }, { passive: false });
+}
+
+/* Any tap or click on an overlay confirms it, so phones never need a keyboard. */
+document.querySelectorAll(".screen").forEach(s => {
+  s.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    Sound.init(); Sound.resume();
+    onConfirm();
+  });
+});
+
+/* ------------------------------ level data -------------------------------
+   Levels are data. Each night is one EF step: the funnel gets wider, pulls
+   harder, tracks faster and throws more, and the sky gets darker. */
+const LEVELS = [
+  { ef: 1, name: "THE ROPE",
+    brief: "A thin ropey funnel over the fairgrounds. It wanders more than it tracks. Learn what the inflow feels like through the wheel.",
+    span: 3600, funnels: 1, core: 30, reach: 300, pull: 165, lift: 15, track: 54,
+    throw: 0.7, rain: 0.45, hail: 0, dark: 0.16, probes: 3, riders: 2, sat: 0 },
+
+  { ef: 2, name: "THE STOVEPIPE",
+    brief: "Two on the ground now, both crossing the highway north of you. The second one is hidden in the rain until it isn't.",
+    span: 4200, funnels: 2, core: 40, reach: 360, pull: 235, lift: 21, track: 66,
+    throw: 1.1, rain: 0.6, hail: 0.15, dark: 0.26, probes: 4, riders: 3, sat: 0 },
+
+  { ef: 3, name: "THE DRILL",
+    brief: "Three funnels turning through the middle of town, taking roofs off as they go. Hail the size of golf balls. Keep your speed up.",
+    span: 4800, funnels: 3, core: 52, reach: 430, pull: 320, lift: 28, track: 78,
+    throw: 1.6, rain: 0.75, hail: 0.4, dark: 0.30, probes: 5, riders: 4, sat: 0 },
+
+  { ef: 4, name: "THE GRINDER",
+    brief: "Four on the ground, one of them a half-mile wide. The grid is down, so what you can see is what the lightning gives you.",
+    span: 5400, funnels: 4, core: 66, reach: 520, pull: 420, lift: 35, track: 88,
+    throw: 1.8, rain: 0.88, hail: 0.6, dark: 0.36, probes: 6, riders: 5, sat: 1 },
+
+  { ef: 5, name: "THE WEDGE",
+    brief: "One monster, slow and enormous, with satellite vortices spinning off its flank. Nothing about this is survivable at a standstill.",
+    span: 6200, funnels: 2, core: 118, reach: 760, pull: 560, lift: 44, track: 62,
+    throw: 2.2, rain: 1.0, hail: 0.8, dark: 0.42, probes: 7, riders: 6, sat: 3 },
+];
+
+const WORLD_W  = 2300;   /* town is wide enough that lateral dodging is real */
+const BLOCK_W  = 320;
+const BLOCK_H  = 360;
+const ROAD_HW  = 46;     /* road half-width */
+const SHELTER_Y = 190;
+const TOWN_EDGE = 118;  /* the barrier at the north end of town */
+
+/* ------------------------------- storage --------------------------------- */
+const Store = {
+  get(key, dflt) {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? dflt : JSON.parse(v);
+    } catch (e) { return dflt; }
+  },
+  set(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* private window */ }
+  },
+};
+
+/* ----------------------------- game state -------------------------------- */
+const game = {
+  state: "title",         /* title | card | run | lifted | wrecked | cleared | over | pause | won */
+  level: 0,
+  score: 0,
+  lives: 3,
+  best: Store.get("hookEcho.best", 0),
+  cfg: LEVELS[0],
+  span: 0,
+  t: 0,                   /* seconds since the level started rolling */
+  outcomeT: 0,
+  nextExtra: 25000,
+  prox: 0,                /* 0..1 nearest-funnel proximity, drives roar + shake */
+  shake: 0,
+  flash: 0,               /* lightning wash */
+  nextBolt: 5,
+  next: "card",
+};
+
+let truck = null;
+let funnels = [];
+let buildings = [];
+let props = [];          /* poles and trees */
+let debris = [];
+let probes = [];
+let riders = [];         /* people waiting to be picked up */
+let bits = [];           /* particles */
+let toasts = [];         /* floating score text */
+let scars = [];          /* ground damage the funnels leave behind */
+let rainDrops = [];
+let shelter = null;
+const cam = { x: 0, y: 0 };
+
+/* --------------------------- town generation -----------------------------
+   A plains grid: north-south roads every BLOCK_W, east-west every BLOCK_H,
+   with a building or a field in each block. Everything is axis-aligned
+   because prairie towns are, and because it keeps collision honest. */
+
+const HOUSE_TINTS = ["#5a4740", "#4d4a55", "#5b5145", "#43514c", "#5c4a4a"];
+const ROOF_TINTS  = ["#2e2723", "#33302f", "#2a2f2c", "#382b26"];
+
+/* Snap to the centreline of the nearest north-south road. The truck has to
+   start on pavement, and the shelter has to sit at the end of a lane you can
+   actually drive down. */
+function roadCenterX(x) {
+  const c = Math.round((x - ROAD_HW) / BLOCK_W);
+  return clamp(c * BLOCK_W + ROAD_HW, ROAD_HW, WORLD_W - ROAD_HW);
+}
+
+function onRoad(x, y) {
+  const rx = ((x % BLOCK_W) + BLOCK_W) % BLOCK_W;
+  const ry = ((y % BLOCK_H) + BLOCK_H) % BLOCK_H;
+  return rx < ROAD_HW * 2 || ry < ROAD_HW * 2;
+}
+
+function buildTown(span) {
+  buildings = [];
+  props = [];
+  riders = [];
+  scars = [];
+
+  const cols = Math.floor(WORLD_W / BLOCK_W);
+  const rows = Math.floor(span / BLOCK_H);
+  const wantRiders = game.cfg.riders;
+  const riderSlots = [];
+
+  for (let r = 1; r < rows - 1; r++) {
+    for (let c = 0; c < cols; c++) {
+      const bx = c * BLOCK_W + ROAD_HW * 2;
+      const by = r * BLOCK_H + ROAD_HW * 2;
+      const bw = BLOCK_W - ROAD_HW * 2;
+      const bh = BLOCK_H - ROAD_HW * 2;
+
+      const roll = Math.random();
+      if (roll < 0.2) {                       /* field: nothing but stubble */
+        if (Math.random() < 0.45) addTree(bx + rand(20, bw - 20), by + rand(20, bh - 20));
+        continue;
+      }
+
+      if (roll < 0.32) {                      /* farmstead: barn plus a silo */
+        const w = rand(bw * 0.5, bw * 0.72), h = rand(bh * 0.34, bh * 0.5);
+        addBuilding(bx + (bw - w) / 2, by + rand(14, 40), w, h, "barn");
+        addBuilding(bx + bw * 0.16, by + bh * 0.62, 46, 46, "silo");
+      } else if (roll < 0.46) {               /* main street block */
+        let x = bx;
+        while (x < bx + bw - 40) {
+          const w = rand(48, 84);
+          addBuilding(x, by + 18, Math.min(w, bx + bw - x), bh * 0.55, "shop");
+          x += w + 6;
+        }
+      } else {                                /* two houses back to back */
+        const w = rand(74, 104), h = rand(58, 78);
+        addBuilding(bx + rand(8, bw - w - 8), by + 22, w, h, "house");
+        if (Math.random() < 0.8) {
+          const w2 = rand(70, 100), h2 = rand(54, 74);
+          addBuilding(bx + rand(8, bw - w2 - 8), by + bh - h2 - 20, w2, h2, "house");
+        }
+        riderSlots.push({ x: bx + bw / 2, y: by + bh / 2 });
+      }
+
+      if (Math.random() < 0.5) addTree(bx + rand(10, bw - 10), by + rand(10, bh - 10));
+    }
+  }
+
+  /* power poles just off the pavement -- clear of the lane you drive in */
+  for (let c = 0; c <= cols; c++) {
+    const x = c * BLOCK_W + ROAD_HW * 2 + 14;
+    for (let y = BLOCK_H; y < span - BLOCK_H; y += 118) {
+      if (x < WORLD_W - 10) props.push({ kind: "pole", x, y, down: false, lean: 0 });
+    }
+  }
+
+  /* the people waiting: spread them up the length of the run, not clumped */
+  riderSlots.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < wantRiders && riderSlots.length; i++) {
+    const idx = Math.floor(((i + 0.5) / wantRiders) * riderSlots.length);
+    const slot = riderSlots[clamp(idx, 0, riderSlots.length - 1)];
+    riders.push({ x: slot.x, y: slot.y, wave: rand(0, TAU), taken: false });
+  }
+
+  shelter = { x: roadCenterX(WORLD_W / 2), y: SHELTER_Y, w: 430, h: 180 };
+}
+
+function addBuilding(x, y, w, h, kind) {
+  buildings.push({
+    x, y, w, h, kind,
+    hp: kind === "silo" ? 3 : kind === "barn" ? 4 : 3,
+    wall: pick(HOUSE_TINTS),
+    roof: pick(ROOF_TINTS),
+    seed: Math.random() * 100,
+    rubble: false,
+  });
+}
+
+function addTree(x, y) {
+  props.push({ kind: "tree", x, y, r: rand(11, 19), down: false, lean: 0 });
+}
+
+/* -------------------------------- truck ----------------------------------
+   Arcade physics with one honest detail: grip. On pavement the tyres kill
+   sideways motion, on grass they mostly don't -- which is why the inflow
+   takes you the moment you leave the road. */
+const TRUCK = {
+  accel: 275, brakeForce: 430, reverse: 130,
+  topRoad: 430, topGrass: 250,
+  steer: 2.5, gripRoad: 6.4, gripGrass: 2.0,
+  dragRoad: 0.55, dragGrass: 2.1,
+  radius: 15,
+};
+
+function makeTruck() {
+  return {
+    x: roadCenterX(WORLD_W / 2), y: game.span - 220,
+    a: -Math.PI / 2,          /* nose north */
+    vx: 0, vy: 0,
+    lift: 0, dmg: 0, hurtCd: 0,
+    aboard: 0,
+    probes: game.cfg.probes,
+    alt: 0, spin: 0,          /* used once the funnel has you */
+    skid: [],
+  };
+}
+
+function speedOf(o) { return Math.hypot(o.vx, o.vy); }
+
+function updateTruck(dt) {
+  const t = truck;
+  if (t.hurtCd > 0) t.hurtCd -= dt;
+  const road = onRoad(t.x, t.y);
+  const top = road ? TRUCK.topRoad : TRUCK.topGrass;
+
+  /* steering authority scales with speed -- no pivoting on the spot */
+  const sp = speedOf(t);
+  const authority = clamp(sp / 110, 0, 1);
+  const rolling = (t.vx * Math.cos(t.a) + t.vy * Math.sin(t.a)) >= -8;
+  const turnDir = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
+  t.a += turnDir * TRUCK.steer * authority * (rolling ? 1 : -1) * dt;
+
+  const fx = Math.cos(t.a), fy = Math.sin(t.a);
+
+  if (keys.gas) { t.vx += fx * TRUCK.accel * dt; t.vy += fy * TRUCK.accel * dt; }
+  if (keys.brake) {
+    const along = t.vx * fx + t.vy * fy;
+    if (along > 12) {
+      const b = TRUCK.brakeForce * dt;
+      t.vx -= fx * b; t.vy -= fy * b;
+    } else {
+      t.vx -= fx * TRUCK.reverse * dt; t.vy -= fy * TRUCK.reverse * dt;
+    }
+  }
+
+  /* split velocity into along-heading and sideways, damp sideways by grip */
+  let along = t.vx * fx + t.vy * fy;
+  let side  = t.vx * -fy + t.vy * fx;
+  const grip = road ? TRUCK.gripRoad : TRUCK.gripGrass;
+  side *= Math.exp(-grip * dt);
+  const drag = road ? TRUCK.dragRoad : TRUCK.dragGrass;
+  along *= Math.exp(-drag * dt);
+  if (Math.abs(along) > top) along = Math.sign(along) * top;
+  t.vx = fx * along + -fy * side;
+  t.vy = fy * along + fx * side;
+
+  t.x += t.vx * dt;
+  t.y += t.vy * dt;
+
+  /* the town has edges; the ditch simply stops you */
+  if (t.x < 14) { t.x = 14; t.vx = Math.abs(t.vx) * 0.3; }
+  if (t.x > WORLD_W - 14) { t.x = WORLD_W - 14; t.vx = -Math.abs(t.vx) * 0.3; }
+  if (t.y > game.span - 40) { t.y = game.span - 40; t.vy = Math.min(t.vy, 0); }
+  if (t.y < TOWN_EDGE) { t.y = TOWN_EDGE; t.vy = Math.max(t.vy, 0); }
+
+  /* tyre marks, only when there is something to mark */
+  if (sp > 150 && Math.abs(side) > 40) {
+    t.skid.push({ x: t.x, y: t.y, a: t.a, life: 2.4 });
+    if (t.skid.length > 120) t.skid.shift();
+  }
+  for (let i = t.skid.length - 1; i >= 0; i--) {
+    t.skid[i].life -= dt;
+    if (t.skid[i].life <= 0) t.skid.splice(i, 1);
+  }
+}
+
+function hurt(n, why) {
+  if (truck.hurtCd > 0) return;          /* one impact, not one per frame */
+  truck.hurtCd = 0.46;
+  truck.dmg = clamp(truck.dmg + n, 0, 100);
+  game.shake = Math.max(game.shake, Math.min(14, n * 0.9));
+  if (truck.dmg >= 100 && game.state === "run") endRun("wrecked", why);
+}
+
+/* ------------------------------- funnels ---------------------------------
+   Each funnel carries its own wind field. The field is what you fight: a
+   tangential component that wants to spin you around it and a radial one
+   that wants to bring you in. Lift accrues by dwell, so speed is safety. */
+function makeFunnel(spec) {
+  const c = game.cfg;
+  const scale = spec.scale || 1;
+  return {
+    x: spec.x, y: spec.y,
+    core: c.core * scale,
+    reach: c.reach * scale,
+    pull: c.pull * scale,
+    liftRate: c.lift * (spec.sat ? 0.8 : 1),
+    vx: 0, vy: 0,
+    track: c.track * (spec.sat ? 0.5 : rand(0.85, 1.15)),
+    phase: rand(0, TAU),
+    wob: rand(0.22, 0.42),
+    seed: rand(0, 100),
+    sat: !!spec.sat,
+    orbit: spec.orbit || 0,
+    orbitA: rand(0, TAU),
+    parent: null,
+    swirl: 0,
+    born: 0,
+  };
+}
+
+function spawnFunnels() {
+  funnels = [];
+  const c = game.cfg;
+  const startY = truck.y - 900;
+
+  for (let i = 0; i < c.funnels; i++) {
+    const big = c.ef === 5 && i === 0;
+    const f = makeFunnel({
+      x: rand(WORLD_W * 0.2, WORLD_W * 0.8),
+      y: startY - i * rand(500, 900),
+      scale: big ? 1 : (c.ef === 5 ? 0.42 : rand(0.85, 1.12)),
+    });
+    funnels.push(f);
+  }
+  /* the wedge drags satellites around with it */
+  const host = funnels[0];
+  for (let i = 0; i < c.sat; i++) {
+    const s = makeFunnel({ x: host.x, y: host.y, scale: 0.3, sat: true, orbit: host.core * rand(1.9, 3.1) });
+    s.parent = host;
+    funnels.push(s);
+  }
+}
+
+function updateFunnels(dt) {
+  const c = game.cfg;
+  for (const f of funnels) {
+    f.born += dt;
+    f.swirl += dt * (2.4 + 220 / f.core);
+
+    if (f.parent) {
+      /* satellites ride the parent's flank */
+      f.orbitA += dt * (1.5 + f.orbit / 260);
+      f.x = f.parent.x + Math.cos(f.orbitA) * f.orbit;
+      f.y = f.parent.y + Math.sin(f.orbitA) * f.orbit * 0.8;
+      chewTown(f, dt);
+      throwDebris(f, dt);
+      continue;
+    }
+
+    /* real tornadoes in this part of the world go up and to the right, with
+       a wobble; a light bias toward the truck's lane keeps the chase honest */
+    f.phase += dt * f.wob;
+    const wob = Math.sin(f.phase) * 0.55 + Math.sin(f.phase * 2.3) * 0.2;
+    const homing = clamp((truck.x - f.x) / 900, -1, 1) * (0.16 + c.ef * 0.03);
+    f.vx = f.track * (0.5 + wob + homing);
+    f.vy = -f.track * 0.72;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+
+    if (f.x < f.core) { f.x = f.core; f.phase += Math.PI; }
+    if (f.x > WORLD_W - f.core) { f.x = WORLD_W - f.core; f.phase += Math.PI; }
+
+    /* once it lifts off past the north edge, a new one drops in behind you */
+    if (f.y < -600 || f.y > truck.y + 1400) {
+      f.x = rand(WORLD_W * 0.15, WORLD_W * 0.85);
+      f.y = truck.y - rand(1000, 1500);
+      f.phase = rand(0, TAU);
+      f.born = 0;
+    }
+
+    /* it eats the town as it goes */
+    chewTown(f, dt);
+    throwDebris(f, dt);
+
+    if (Math.random() < dt * 2.6) {
+      scars.push({ x: f.x + rand(-f.core, f.core), y: f.y + rand(-f.core, f.core),
+                   r: rand(f.core * 0.3, f.core * 0.8), life: 60 });
+      if (scars.length > 260) scars.shift();
+    }
+  }
+}
+
+/* the wind field, sampled at a point -- used for the truck and for debris */
+function windAt(x, y, out) {
+  out.fx = 0; out.fy = 0; out.k = 0;
+  for (const f of funnels) {
+    const dx = x - f.x, dy = y - f.y;
+    const d = Math.hypot(dx, dy) || 0.001;
+    if (d > f.reach) continue;
+    const k = Math.pow(1 - d / f.reach, 2);
+    const nx = dx / d, ny = dy / d;
+    /* counter-clockwise tangent, plus inward pull */
+    out.fx += (-ny * 1.0 - nx * 0.55) * f.pull * k;
+    out.fy += ( nx * 1.0 - ny * 0.55) * f.pull * k;
+    out.k = Math.max(out.k, d < f.core ? 1.6 : k);
+  }
+  return out;
+}
+
+const windSample = { fx: 0, fy: 0, k: 0 };
+
+function applyWind(dt) {
+  const w = windAt(truck.x, truck.y, windSample);
+  truck.vx += w.fx * dt;
+  truck.vy += w.fy * dt;
+
+  /* dwell is what kills you: standing still in the inflow is being a sail */
+  let rate = 0;
+  for (const f of funnels) {
+    const d = dist(truck.x, truck.y, f.x, f.y);
+    if (d > f.reach) continue;
+    const k = Math.pow(1 - d / f.reach, 2);
+    const inCore = d < f.core;
+    rate += f.liftRate * (inCore ? 4.5 : k * 1.9);
+  }
+  const sp = speedOf(truck);
+  const sail = lerp(1.55, 0.8, clamp(sp / TRUCK.topRoad, 0, 1));
+  const before = truck.lift;
+  if (rate > 0) truck.lift = clamp(truck.lift + rate * sail * dt, 0, 100);
+  else truck.lift = clamp(truck.lift - 19 * dt, 0, 100);
+
+  game.prox = clamp(w.k, 0, 1);
+  game.shake = Math.max(game.shake, game.prox * 9);
+
+  if (Math.max(before, truck.lift) >= 100 && game.state === "run") endRun("lifted");
+}
+
+/* ------------------------------- the town ---------------------------------
+   Funnels take the buildings apart. The rubble is not decoration: the pieces
+   it throws are the same debris that can end your run. */
+function chewTown(f, dt) {
+  for (const b of buildings) {
+    if (b.rubble) continue;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    if (Math.abs(cx - f.x) > f.core + b.w || Math.abs(cy - f.y) > f.core + b.h) continue;
+    if (dist(cx, cy, f.x, f.y) > f.core + Math.max(b.w, b.h) * 0.4) continue;
+    b.hp -= dt * 2.8;
+    if (b.hp <= 0) {
+      b.rubble = true;
+      Sound.thud();
+      for (let i = 0; i < 9; i++) {
+        const a = rand(0, TAU), s = rand(110, 330);
+        spawnDebris(cx, cy, Math.cos(a) * s, Math.sin(a) * s, pick(["board", "sheet", "board", "shingle"]));
+      }
+      for (let i = 0; i < 16; i++) puff(cx + rand(-b.w / 2, b.w / 2), cy + rand(-b.h / 2, b.h / 2), "#6b6157");
+    }
+  }
+  for (const p of props) {
+    if (p.down) continue;
+    if (dist(p.x, p.y, f.x, f.y) < f.core * 1.15) {
+      p.down = true;
+      p.lean = rand(0, TAU);
+      if (p.kind === "pole") {
+        spawnDebris(p.x, p.y, rand(-160, 160), rand(-160, 160), "wire");
+        game.flash = Math.max(game.flash, 0.35);   /* the transformer goes */
+        Sound.scrape();
+      }
+    }
+  }
+}
+
+/* -------------------------------- debris ---------------------------------- */
+const DEBRIS_KIND = {
+  board:   { w: 26, h: 5,  dmg: 9,  col: "#8a7355" },
+  sheet:   { w: 30, h: 12, dmg: 11, col: "#9aa6a2" },
+  shingle: { w: 13, h: 9,  dmg: 6,  col: "#4a423c" },
+  wire:    { w: 34, h: 3,  dmg: 7,  col: "#3f4a46" },
+  tyre:    { w: 15, h: 15, dmg: 11, col: "#2c2f2e" },
+  cow:     { w: 26, h: 14, dmg: 13, col: "#c9c3b6" },
+};
+
+function spawnDebris(x, y, vx, vy, kind) {
+  debris.push({ x, y, vx, vy, kind, a: rand(0, TAU), spin: rand(-9, 9), life: rand(4.5, 8) });
+  if (debris.length > 220) debris.shift();
+}
+
+function throwDebris(f, dt) {
+  const rate = game.cfg.throw * (f.sat ? 0.3 : 1);
+  if (Math.random() > dt * rate * 2.4) return;
+  const a = rand(0, TAU);
+  const r = f.core * rand(0.7, 1.5);
+  const kind = Math.random() < 0.035 ? "cow"
+             : pick(["board", "sheet", "shingle", "tyre", "board"]);
+  const out = rand(120, 260);
+  spawnDebris(f.x + Math.cos(a) * r, f.y + Math.sin(a) * r,
+              Math.cos(a + 1.4) * out, Math.sin(a + 1.4) * out, kind);
+}
+
+function updateDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i];
+    d.life -= dt;
+    if (d.life <= 0 || d.y < -900 || d.y > game.span + 400) { debris.splice(i, 1); continue; }
+    const w = windAt(d.x, d.y, windSample);
+    d.vx += w.fx * dt * 1.8;      /* debris is lighter than a truck */
+    d.vy += w.fy * dt * 1.8;
+    d.vx *= Math.exp(-0.9 * dt);
+    d.vy *= Math.exp(-0.9 * dt);
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    d.a += d.spin * dt;
+
+    if (game.state === "run") {
+      const spec = DEBRIS_KIND[d.kind];
+      if (dist(d.x, d.y, truck.x, truck.y) < TRUCK.radius + spec.w * 0.4) {
+        hurt(spec.dmg, d.kind);
+        Sound.thud();
+        for (let k = 0; k < 7; k++) puff(d.x, d.y, spec.col);
+        if (d.kind === "cow") flashRadio("NATALIE", "was that a cow?");
+        debris.splice(i, 1);
+      }
+    }
+  }
+}
+
+/* -------------------------------- probes ---------------------------------
+   The risk-for-score loop. A probe is worth what it can see, and what it can
+   see depends on how close to the funnel you were willing to get. */
+function dropProbe() {
+  if (game.state !== "run" || !truck || truck.probes <= 0) return;
+  truck.probes--;
+
+  let best = Infinity, host = null;
+  for (const f of funnels) {
+    const d = dist(truck.x, truck.y, f.x, f.y);
+    if (d < best) { best = d; host = f; }
+  }
+  const reach = host ? host.reach : 1;
+  const closeness = host ? clamp(1 - best / reach, 0, 1) : 0;
+  const value = Math.round(150 + 2350 * Math.pow(closeness, 1.7));
+
+  probes.push({
+    x: truck.x, y: truck.y, t: 0, sampled: false,
+    closeness, ring: 0,
+  });
+  addScore(value, truck.x, truck.y, closeness > 0.6 ? "GOOD DATA" : "DEPLOYED");
+  Sound.probe();
+  if (closeness > 0.72) flashRadio("NATALIE", "that one is going to read beautifully");
+  else if (closeness < 0.12) flashRadio("DISPATCH", "unit 7, that is nowhere near it");
+  updateHUD();
+}
+
+function updateProbes(dt) {
+  for (const p of probes) {
+    p.t += dt;
+    p.ring = (p.ring + dt * 1.6) % 1;
+    if (p.sampled) continue;
+    for (const f of funnels) {
+      if (dist(p.x, p.y, f.x, f.y) < f.core) {
+        p.sampled = true;
+        addScore(3000, p.x, p.y, "DIRECT SAMPLE");
+        Sound.sample();
+        flashRadio("NATALIE", "we are inside it &mdash; we have the whole profile");
+        break;
+      }
+    }
+  }
+}
+
+/* ------------------------------- the people ------------------------------- */
+function updateRiders(dt) {
+  for (const r of riders) {
+    if (r.taken) continue;
+    r.wave += dt * 6;
+    if (dist(r.x, r.y, truck.x, truck.y) < 46 && speedOf(truck) < 210) {
+      r.taken = true;
+      truck.aboard++;
+      addScore(500, r.x, r.y, "ABOARD");
+      Sound.board();
+      flashRadio("NATALIE", pick([
+        "get in, get down, hold onto something",
+        "that is four seats and one of them is mine",
+        "keep your head below the window line",
+      ]));
+      updateHUD();
+    }
+  }
+}
+
+/* ------------------------------- weather ---------------------------------- */
+function seedRain() {
+  rainDrops = [];
+  const n = Math.round(220 + game.cfg.rain * 420);
+  for (let i = 0; i < n; i++) {
+    rainDrops.push({
+      x: Math.random(), y: Math.random(),
+      len: rand(0.6, 1.5), sp: rand(0.8, 1.6),
+      hail: Math.random() < game.cfg.hail * 0.35,
+    });
+  }
+}
+
+function updateWeather(dt) {
+  game.flash = Math.max(0, game.flash - dt * 2.4);
+  game.nextBolt -= dt;
+  if (game.nextBolt <= 0) {
+    game.nextBolt = rand(2.6, 8) * (1.4 - game.cfg.dark);
+    game.flash = rand(0.55, 1);
+    Sound.thunder();
+  }
+  game.shake = Math.max(0, game.shake - dt * 26);
+}
+
+/* ------------------------------- particles -------------------------------- */
+function puff(x, y, col) {
+  bits.push({ x, y, vx: rand(-70, 70), vy: rand(-70, 70), r: rand(2, 5.5), life: rand(0.3, 0.9), col });
+  if (bits.length > 420) bits.shift();
+}
+
+function updateBits(dt) {
+  for (let i = bits.length - 1; i >= 0; i--) {
+    const p = bits[i];
+    p.life -= dt;
+    if (p.life <= 0) { bits.splice(i, 1); continue; }
+    const w = windAt(p.x, p.y, windSample);
+    p.vx += w.fx * dt * 2.2; p.vy += w.fy * dt * 2.2;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= Math.exp(-1.6 * dt); p.vy *= Math.exp(-1.6 * dt);
+  }
+  for (let i = toasts.length - 1; i >= 0; i--) {
+    const t = toasts[i];
+    t.life -= dt;
+    t.y -= 26 * dt;
+    if (t.life <= 0) toasts.splice(i, 1);
+  }
+  for (let i = scars.length - 1; i >= 0; i--) {
+    scars[i].life -= dt;
+    if (scars[i].life <= 0) scars.splice(i, 1);
+  }
+}
+
+/* -------------------------------- scoring --------------------------------- */
+function addScore(n, x, y, label) {
+  game.score += n;
+  if (game.score >= game.nextExtra) {
+    game.nextExtra += 25000;
+    game.lives++;
+    flashRadio("DISPATCH", "another unit is joining the chase");
+    Sound.clear();
+  }
+  if (label) toasts.push({ x, y, text: label + " +" + commas(n), life: 1.7 });
+  updateHUD();
+}
+
+/* --------------------------------- radio ---------------------------------- */
+const radioEl = document.getElementById("radio");
+const radioWho = document.getElementById("radioWho");
+const radioText = document.getElementById("radioText");
+let radioTimer = 0;
+
+function flashRadio(who, text) {
+  radioWho.textContent = who;
+  radioText.innerHTML = text;
+  radioEl.classList.add("on");
+  radioTimer = 3.4;
+}
+
+function updateRadio(dt) {
+  if (radioTimer > 0) {
+    radioTimer -= dt;
+    if (radioTimer <= 0) radioEl.classList.remove("on");
+  }
+}
+
+/* -------------------------------- camera ---------------------------------- */
+function updateCamera(dt) {
+  /* look where you are going, a little */
+  const leadX = truck.vx * 0.35, leadY = truck.vy * 0.45;
+  const tx = truck.x + leadX - W / 2;
+  const ty = truck.y + leadY - H * 0.58;
+  const k = 1 - Math.exp(-6 * dt);
+  cam.x += (tx - cam.x) * k;
+  cam.y += (ty - cam.y) * k;
+  cam.x = clamp(cam.x, -60, WORLD_W - W + 60);
+  if (WORLD_W < W) cam.x = (WORLD_W - W) / 2;
+  cam.y = clamp(cam.y, -400, game.span - H + 200);
+}
+
+/* ------------------------------- collision -------------------------------- */
+function collideBuildings() {
+  const r = TRUCK.radius;
+  for (const b of buildings) {
+    if (b.rubble) continue;
+    if (truck.x + r < b.x || truck.x - r > b.x + b.w) continue;
+    if (truck.y + r < b.y || truck.y - r > b.y + b.h) continue;
+
+    /* push out along whichever wall we are least deep into */
+    const dl = truck.x + r - b.x;
+    const dr = b.x + b.w - (truck.x - r);
+    const dt2 = truck.y + r - b.y;
+    const db = b.y + b.h - (truck.y - r);
+    const m = Math.min(dl, dr, dt2, db);
+    const sp = speedOf(truck);
+
+    if (m === dl)      { truck.x = b.x - r; truck.vx = -Math.abs(truck.vx) * 0.25; }
+    else if (m === dr) { truck.x = b.x + b.w + r; truck.vx = Math.abs(truck.vx) * 0.25; }
+    else if (m === dt2){ truck.y = b.y - r; truck.vy = -Math.abs(truck.vy) * 0.25; }
+    else               { truck.y = b.y + b.h + r; truck.vy = Math.abs(truck.vy) * 0.25; }
+
+    if (sp > 120 && truck.hurtCd <= 0) {
+      hurt(3 + sp * 0.013, "wall");
+      Sound.thud();
+      for (let i = 0; i < 6; i++) puff(truck.x, truck.y, "#8d8578");
+      b.hp -= 0.6;
+    }
+  }
+
+  for (const p of props) {
+    if (p.down) continue;
+    const rr = p.kind === "pole" ? 7 : p.r * 0.7;
+    if (dist(p.x, p.y, truck.x, truck.y) < r + rr) {
+      const sp = speedOf(truck);
+      p.down = true; p.lean = Math.atan2(truck.vy, truck.vx);
+      truck.vx *= 0.55; truck.vy *= 0.55;
+      hurt(p.kind === "pole" ? 7 : 5, p.kind);
+      Sound.thud();
+      for (let i = 0; i < 8; i++) puff(p.x, p.y, p.kind === "pole" ? "#4b5450" : "#3d5e46");
+      if (sp > 260 && p.kind === "pole") flashRadio("NATALIE", "we do not have another bumper");
+    }
+  }
+}
+
+function checkShelter() {
+  const s = shelter;
+  /* anywhere in the apron's lanes, at or past its south edge. The barrier
+     sits inside the apron, so there is no way to overshoot it. */
+  if (truck.x > s.x - s.w / 2 && truck.x < s.x + s.w / 2 && truck.y < s.y + s.h / 2) {
+    endRun("cleared");
+  }
+}
+
+/* --------------------------------- HUD ------------------------------------ */
+const hudEl   = document.getElementById("hud");
+const efVal   = document.getElementById("efVal");
+const liftCell= document.getElementById("liftCell");
+const liftCap = document.getElementById("liftCap");
+const liftFill= document.getElementById("liftFill");
+const dmgFill = document.getElementById("dmgFill");
+const probeDots = document.getElementById("probeDots");
+const ridersVal = document.getElementById("ridersVal");
+const distVal = document.getElementById("distVal");
+const scoreVal= document.getElementById("scoreVal");
+const livesVal= document.getElementById("livesVal");
+const radarBox= document.getElementById("radarBox");
+const cached  = { probes: -1, score: -1, lives: -1, aboard: -1, dist: -1, lift: -1, dmg: -1, cls: "" };
+
+function updateHUD() {
+  if (!truck) return;
+  const lift = Math.round(truck.lift);
+  if (lift !== cached.lift) {
+    liftFill.style.width = lift + "%";
+    cached.lift = lift;
+    const cls = lift > 78 ? "crit" : lift > 45 ? "warn" : "";
+    if (cls !== cached.cls) {
+      liftCell.className = "cell " + cls;
+      liftCap.textContent = lift > 78 ? "LIFT — GET OUT" : lift > 45 ? "LIFT — RISING" : "LIFT";
+      cached.cls = cls;
+    }
+  }
+  const dmg = Math.round(truck.dmg);
+  if (dmg !== cached.dmg) { dmgFill.style.width = dmg + "%"; cached.dmg = dmg; }
+
+  if (truck.probes !== cached.probes) {
+    let html = "";
+    for (let i = 0; i < game.cfg.probes; i++) html += '<span class="' + (i < truck.probes ? "" : "spent") + '"></span>';
+    probeDots.innerHTML = html;
+    cached.probes = truck.probes;
+  }
+  if (truck.aboard !== cached.aboard) { ridersVal.textContent = truck.aboard; cached.aboard = truck.aboard; }
+  if (game.score !== cached.score) { scoreVal.textContent = commas(game.score); cached.score = game.score; }
+  if (game.lives !== cached.lives) { livesVal.textContent = game.lives; cached.lives = game.lives; }
+
+  const d = Math.max(0, Math.round((truck.y - shelter.y) / 22));
+  if (d !== cached.dist) { distVal.textContent = d; cached.dist = d; }
+}
+
+function resetHUDCache() {
+  cached.probes = cached.score = cached.lives = cached.aboard = cached.dist = cached.lift = cached.dmg = -1;
+  cached.cls = "___";
+  efVal.textContent = "EF" + game.cfg.ef;
+}
+
+/* --------------------------------- radar ---------------------------------- */
+const radarCv = document.getElementById("radar");
+const rctx = radarCv.getContext("2d");
+let sweep = 0;
+
+function drawRadar(dt) {
+  const S = radarCv.width;
+  sweep = (sweep + dt * 0.9) % 1;
+  rctx.clearRect(0, 0, S, S);
+  rctx.fillStyle = "#071009";
+  rctx.fillRect(0, 0, S, S);
+
+  /* the radar shows the length of the run, not the whole county */
+  const viewH = 2600;
+  const topY = clamp(truck.y - viewH * 0.62, -300, game.span);
+  const sx = S / WORLD_W;
+  const sy = S / viewH;
+  const px = v => v * sx;
+  const py = v => (v - topY) * sy;
+
+  rctx.strokeStyle = "rgba(126,240,176,.16)";
+  rctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    rctx.beginPath(); rctx.moveTo((S / 4) * i, 0); rctx.lineTo((S / 4) * i, S); rctx.stroke();
+    rctx.beginPath(); rctx.moveTo(0, (S / 4) * i); rctx.lineTo(S, (S / 4) * i); rctx.stroke();
+  }
+
+  /* shelter line at the top of the run */
+  const shy = py(shelter.y);
+  if (shy > -4 && shy < S + 4) {
+    rctx.strokeStyle = "#ffb703";
+    rctx.setLineDash([6, 5]);
+    rctx.beginPath(); rctx.moveTo(0, shy); rctx.lineTo(S, shy); rctx.stroke();
+    rctx.setLineDash([]);
+  }
+
+  /* reflectivity: the funnels, drawn as the hook they'd actually paint */
+  for (const f of funnels) {
+    const x = px(f.x), y = py(f.y);
+    const rr = Math.max(5, f.reach * sx * 0.62);
+    const g = rctx.createRadialGradient(x, y, 1, x, y, rr);
+    g.addColorStop(0, "rgba(255,77,46,.95)");
+    g.addColorStop(0.35, "rgba(255,183,3,.7)");
+    g.addColorStop(0.7, "rgba(126,240,176,.42)");
+    g.addColorStop(1, "rgba(126,240,176,0)");
+    rctx.fillStyle = g;
+    rctx.beginPath(); rctx.arc(x, y, rr, 0, TAU); rctx.fill();
+    /* the hook itself */
+    rctx.strokeStyle = "rgba(255,183,3,.8)";
+    rctx.lineWidth = 3;
+    rctx.beginPath();
+    rctx.arc(x, y, rr * 0.55, f.swirl * 0.4, f.swirl * 0.4 + 2.4);
+    rctx.stroke();
+  }
+
+  /* the truck */
+  const tx = px(truck.x), ty = py(truck.y);
+  rctx.fillStyle = "#e8f2ee";
+  rctx.beginPath(); rctx.arc(tx, ty, 4, 0, TAU); rctx.fill();
+  rctx.strokeStyle = "rgba(232,242,238,.5)";
+  rctx.lineWidth = 2;
+  rctx.beginPath(); rctx.arc(tx, ty, 9, 0, TAU); rctx.stroke();
+
+  /* sweep */
+  const sweepY = sweep * S;
+  const sg = rctx.createLinearGradient(0, sweepY - 26, 0, sweepY);
+  sg.addColorStop(0, "rgba(126,240,176,0)");
+  sg.addColorStop(1, "rgba(126,240,176,.22)");
+  rctx.fillStyle = sg;
+  rctx.fillRect(0, sweepY - 26, S, 26);
+}
+
+/* -------------------------------- drawing --------------------------------- */
+function inView(x, y, pad) {
+  return x > cam.x - pad && x < cam.x + W + pad && y > cam.y - pad && y < cam.y + H + pad;
+}
+
+function drawGround() {
+  /* prairie: an olive wash that darkens with the level, so EF5 is nearly night */
+  const dark = game.cfg.dark;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#101a15");
+  g.addColorStop(1, "#0a120e");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  /* section lines in the fields, faint */
+  ctx.strokeStyle = "rgba(126,240,176,.045)";
+  ctx.lineWidth = 1;
+  const x0 = Math.floor(cam.x / 80) * 80;
+  for (let x = x0; x < cam.x + W + 80; x += 80) {
+    ctx.beginPath(); ctx.moveTo(x, cam.y); ctx.lineTo(x, cam.y + H); ctx.stroke();
+  }
+
+  /* scars the funnels have already cut */
+  for (const s of scars) {
+    if (!inView(s.x, s.y, 120)) continue;
+    ctx.fillStyle = "rgba(58,44,32," + clamp(s.life / 60, 0, 1) * 0.5 + ")";
+    ctx.beginPath(); ctx.ellipse(s.x, s.y, s.r, s.r * 0.7, 0, 0, TAU); ctx.fill();
+  }
+
+  /* roads */
+  const cols = Math.floor(WORLD_W / BLOCK_W);
+  const rows = Math.ceil(game.span / BLOCK_H);
+  ctx.fillStyle = "#232b28";
+  for (let c = 0; c <= cols; c++) {
+    const x = c * BLOCK_W;
+    if (x + ROAD_HW * 2 < cam.x || x > cam.x + W) continue;
+    ctx.fillRect(x, Math.max(0, cam.y - 40), ROAD_HW * 2, Math.min(game.span, H + 80));
+  }
+  for (let r = 0; r <= rows; r++) {
+    const y = r * BLOCK_H;
+    if (y + ROAD_HW * 2 < cam.y || y > cam.y + H) continue;
+    ctx.fillRect(Math.max(0, cam.x - 40), y, Math.min(WORLD_W, W + 80), ROAD_HW * 2);
+  }
+
+  /* shoulder stripes: what you steer by once the streetlights are gone */
+  ctx.strokeStyle = "rgba(232,242,238,.13)";
+  ctx.lineWidth = 2;
+  for (let c = 0; c <= cols; c++) {
+    const x = c * BLOCK_W;
+    if (x + ROAD_HW * 2 < cam.x - 20 || x > cam.x + W + 20) continue;
+    ctx.beginPath(); ctx.moveTo(x + 3, cam.y - 40); ctx.lineTo(x + 3, cam.y + H + 40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + ROAD_HW * 2 - 3, cam.y - 40); ctx.lineTo(x + ROAD_HW * 2 - 3, cam.y + H + 40); ctx.stroke();
+  }
+  for (let r = 0; r <= rows; r++) {
+    const y = r * BLOCK_H;
+    if (y + ROAD_HW * 2 < cam.y - 20 || y > cam.y + H + 20) continue;
+    ctx.beginPath(); ctx.moveTo(cam.x - 40, y + 3); ctx.lineTo(cam.x + W + 40, y + 3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cam.x - 40, y + ROAD_HW * 2 - 3); ctx.lineTo(cam.x + W + 40, y + ROAD_HW * 2 - 3); ctx.stroke();
+  }
+
+  /* centre lines */
+  ctx.strokeStyle = "rgba(255,183,3,.34)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([16, 20]);
+  for (let c = 0; c <= cols; c++) {
+    const x = c * BLOCK_W + ROAD_HW;
+    if (x < cam.x - 20 || x > cam.x + W + 20) continue;
+    ctx.beginPath(); ctx.moveTo(x, cam.y - 40); ctx.lineTo(x, cam.y + H + 40); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  /* the north barrier, with arrows pointing along it to the shelter */
+  if (cam.y < 260) {
+    ctx.fillStyle = "rgba(38,46,42,.95)";
+    ctx.fillRect(cam.x - 40, TOWN_EDGE - 30, W + 80, 12);
+    ctx.fillStyle = "rgba(255,183,3,.55)";
+    const step = 120;
+    const a0 = Math.floor((cam.x - 40) / step) * step;
+    for (let x = a0; x < cam.x + W + 40; x += step) {
+      const dir = shelter.x > x ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(x + dir * 9, TOWN_EDGE - 12);
+      ctx.lineTo(x - dir * 5, TOWN_EDGE - 19);
+      ctx.lineTo(x - dir * 5, TOWN_EDGE - 5);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  /* skid marks */
+  ctx.strokeStyle = "rgba(10,14,12,.6)";
+  ctx.lineWidth = 3;
+  for (const s of truck.skid) {
+    if (!inView(s.x, s.y, 40)) continue;
+    ctx.globalAlpha = clamp(s.life / 2.4, 0, 1) * 0.7;
+    const nx = -Math.sin(s.a) * 9, ny = Math.cos(s.a) * 9;
+    ctx.beginPath();
+    ctx.moveTo(s.x + nx, s.y + ny); ctx.lineTo(s.x + nx * 1.02, s.y + ny * 1.02);
+    ctx.moveTo(s.x - nx, s.y - ny); ctx.lineTo(s.x - nx * 1.02, s.y - ny * 1.02);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawShelter() {
+  const s = shelter;
+  if (!inView(s.x, s.y, 400)) return;
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  /* the apron, lit */
+  ctx.fillStyle = "rgba(255,183,3,.08)";
+  ctx.fillRect(s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
+  ctx.strokeStyle = "#ffb703";
+  ctx.lineWidth = 3;
+  ctx.setLineDash([14, 10]);
+  ctx.strokeRect(s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
+  ctx.setLineDash([]);
+
+  /* the structure itself, low and concrete */
+  ctx.fillStyle = "#2b322f";
+  ctx.fillRect(s.x - 96, s.y - 40, 192, 80);
+  ctx.fillStyle = "#3a423e";
+  ctx.fillRect(s.x - 96, s.y - 40, 192, 14);
+  ctx.fillStyle = "#ffb703";
+  ctx.fillRect(s.x - 20, s.y + 24, 40, 16);
+
+  ctx.fillStyle = "#e8f2ee";
+  ctx.font = '700 22px "Saira Condensed", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText("SHELTER", s.x, s.y + 4);
+  ctx.restore();
+}
+
+function drawBuildings() {
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+  for (const b of buildings) {
+    if (!inView(b.x + b.w / 2, b.y + b.h / 2, 220)) continue;
+
+    if (b.rubble) {
+      ctx.fillStyle = "rgba(52,46,40,.72)";
+      ctx.beginPath();
+      ctx.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w * 0.6, b.h * 0.55, 0, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = "rgba(94,84,72,.85)";
+      for (let i = 0; i < 7; i++) {
+        const a = b.seed + i * 1.7;
+        ctx.save();
+        ctx.translate(b.x + b.w / 2 + Math.cos(a) * b.w * 0.34, b.y + b.h / 2 + Math.sin(a * 1.3) * b.h * 0.34);
+        ctx.rotate(a);
+        ctx.fillRect(-9, -2, 18, 4);
+        ctx.restore();
+      }
+      continue;
+    }
+
+    /* a dropped shadow to the south-east reads as height from overhead */
+    ctx.fillStyle = "rgba(4,7,6,.5)";
+    ctx.fillRect(b.x + 5, b.y + 6, b.w, b.h);
+
+    ctx.fillStyle = b.wall;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = b.roof;
+
+    if (b.kind === "silo") {
+      ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, 0, TAU); ctx.fill();
+      ctx.strokeStyle = "rgba(232,242,238,.18)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 3, 0, TAU); ctx.stroke();
+    } else if (b.kind === "barn") {
+      ctx.fillRect(b.x + 4, b.y + 4, b.w - 8, b.h - 8);
+      ctx.strokeStyle = "rgba(232,242,238,.13)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.w / 2, b.y + 4); ctx.lineTo(b.x + b.w / 2, b.y + b.h - 4);
+      ctx.stroke();
+    } else {
+      /* a ridge line down the long axis so roofs read as roofs */
+      ctx.fillRect(b.x + 3, b.y + 3, b.w - 6, b.h - 6);
+      ctx.strokeStyle = "rgba(232,242,238,.12)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (b.w > b.h) { ctx.moveTo(b.x + 6, b.y + b.h / 2); ctx.lineTo(b.x + b.w - 6, b.y + b.h / 2); }
+      else { ctx.moveTo(b.x + b.w / 2, b.y + 6); ctx.lineTo(b.x + b.w / 2, b.y + b.h - 6); }
+      ctx.stroke();
+    }
+
+    /* damage shows before collapse */
+    if (b.hp < 2.4) {
+      ctx.fillStyle = "rgba(20,16,12,.55)";
+      for (let i = 0; i < 4; i++) {
+        const a = b.seed + i * 2.1;
+        ctx.fillRect(b.x + ((Math.abs(Math.sin(a)) * (b.w - 14)) | 0), b.y + ((Math.abs(Math.cos(a)) * (b.h - 14)) | 0), 12, 10);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawProps() {
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+  for (const p of props) {
+    if (!inView(p.x, p.y, 80)) continue;
+    if (p.kind === "tree") {
+      if (p.down) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.lean);
+        ctx.fillStyle = "rgba(40,56,44,.8)";
+        ctx.fillRect(0, -4, p.r * 2.2, 8);
+        ctx.beginPath(); ctx.arc(p.r * 2.4, 0, p.r * 0.7, 0, TAU); ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.fillStyle = "rgba(4,7,6,.45)";
+        ctx.beginPath(); ctx.arc(p.x + 4, p.y + 5, p.r, 0, TAU); ctx.fill();
+        ctx.fillStyle = "#2f4a37";
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+        ctx.fillStyle = "rgba(126,240,176,.10)";
+        ctx.beginPath(); ctx.arc(p.x - p.r * 0.3, p.y - p.r * 0.3, p.r * 0.5, 0, TAU); ctx.fill();
+      }
+    } else {
+      if (p.down) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.lean);
+        ctx.strokeStyle = "rgba(70,78,74,.85)"; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(58, 0); ctx.stroke();
+        ctx.restore();
+      } else {
+        ctx.fillStyle = "rgba(4,7,6,.5)";
+        ctx.fillRect(p.x - 2, p.y - 2, 26, 5);
+        ctx.fillStyle = "#4b5450";
+        ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+        ctx.fillRect(p.x - 13, p.y - 8, 26, 3);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawRiders() {
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+  for (const r of riders) {
+    if (r.taken || !inView(r.x, r.y, 80)) continue;
+    const wave = Math.sin(r.wave) * 0.5;
+    /* a lit doorway so you can spot them through the rain */
+    ctx.fillStyle = "rgba(255,183,3,.14)";
+    ctx.beginPath(); ctx.arc(r.x, r.y, 30, 0, TAU); ctx.fill();
+    ctx.fillStyle = "#e8f2ee";
+    ctx.beginPath(); ctx.arc(r.x, r.y - 4, 4, 0, TAU); ctx.fill();
+    ctx.fillRect(r.x - 3, r.y, 6, 9);
+    ctx.strokeStyle = "#e8f2ee"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(r.x + 2, r.y + 2);
+    ctx.lineTo(r.x + 8, r.y - 5 + wave * 6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawProbes() {
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+  for (const p of probes) {
+    if (!inView(p.x, p.y, 120)) continue;
+    ctx.fillStyle = p.sampled ? "#ffb703" : "#7ef0b0";
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = (p.sampled ? "rgba(255,183,3," : "rgba(126,240,176,") + (1 - p.ring) * 0.5 + ")";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 6 + p.ring * 34, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawDebris() {
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+  for (const d of debris) {
+    if (!inView(d.x, d.y, 80)) continue;
+    const spec = DEBRIS_KIND[d.kind];
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.rotate(d.a);
+    ctx.fillStyle = "rgba(4,7,6,.45)";
+    ctx.fillRect(-spec.w / 2 + 4, -spec.h / 2 + 4, spec.w, spec.h);
+    ctx.fillStyle = spec.col;
+    if (d.kind === "tyre") {
+      ctx.beginPath(); ctx.arc(0, 0, spec.w / 2, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#4a4f4d";
+      ctx.beginPath(); ctx.arc(0, 0, spec.w / 4, 0, TAU); ctx.fill();
+    } else if (d.kind === "cow") {
+      ctx.fillRect(-spec.w / 2, -spec.h / 2, spec.w, spec.h);
+      ctx.fillStyle = "#3a3630";
+      ctx.fillRect(-spec.w / 2 + 3, -spec.h / 2 + 2, 7, 5);
+      ctx.fillRect(1, 1, 6, 5);
+    } else {
+      ctx.fillRect(-spec.w / 2, -spec.h / 2, spec.w, spec.h);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawTruck() {
+  const t = truck;
+  const lifted = game.state === "lifted";
+  const scale = lifted ? 1 + t.alt * 1.3 : 1;
+  ctx.save();
+  ctx.translate(t.x - cam.x, t.y - cam.y);
+
+  /* the shadow pulls away and shrinks as the funnel takes you up */
+  ctx.save();
+  ctx.translate(6 + t.alt * 34, 8 + t.alt * 26);
+  ctx.scale(1 / (1 + t.alt * 1.6), 1 / (1 + t.alt * 1.6));
+  ctx.rotate(t.a + Math.PI / 2);
+  ctx.fillStyle = "rgba(4,7,6,.5)";
+  ctx.fillRect(-16, -27, 32, 54);
+  ctx.restore();
+
+  ctx.rotate(t.a + Math.PI / 2 + t.spin);
+  ctx.scale(scale, scale);
+
+  /* hazard lights on wet asphalt: a marker so you can always find yourself */
+  if (!lifted) {
+    const pulse = 0.16 + 0.08 * Math.sin(game.t * 7);
+    const ring = ctx.createRadialGradient(0, 0, 12, 0, 0, 46);
+    ring.addColorStop(0, "rgba(255,183,3," + pulse + ")");
+    ring.addColorStop(1, "rgba(255,183,3,0)");
+    ctx.fillStyle = ring;
+    ctx.beginPath(); ctx.arc(0, 0, 46, 0, TAU); ctx.fill();
+  }
+
+  /* headlights, cast forward */
+  if (!lifted) {
+    const beam = ctx.createLinearGradient(0, -24, 0, -190);
+    beam.addColorStop(0, "rgba(255,239,196,.20)");
+    beam.addColorStop(1, "rgba(255,239,196,0)");
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(-11, -26); ctx.lineTo(-64, -190); ctx.lineTo(64, -190); ctx.lineTo(11, -26);
+    ctx.closePath(); ctx.fill();
+  }
+
+  ctx.fillStyle = "#1d2422";                     /* tyres */
+  ctx.fillRect(-17, -19, 6, 13);
+  ctx.fillRect(11, -19, 6, 13);
+  ctx.fillRect(-17, 8, 6, 13);
+  ctx.fillRect(11, 8, 6, 13);
+
+  ctx.fillStyle = "#c8ccc4";                     /* body: a white chase truck */
+  ctx.fillRect(-14, -26, 28, 52);
+  ctx.fillStyle = "#9aa39c";                     /* bed */
+  ctx.fillRect(-12, 2, 24, 22);
+  ctx.fillStyle = "#141b19";                     /* cab glass */
+  ctx.fillRect(-11, -18, 22, 16);
+  ctx.fillStyle = "#7ef0b0";                     /* the unit stripe */
+  ctx.fillRect(-14, -2, 28, 3);
+  ctx.fillStyle = "#0f1513";
+  ctx.font = '800 8px "Saira Condensed", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText("7", 0, 22);
+
+  /* light bar, amber, alternating */
+  const flip = Math.floor(game.t * 6) % 2 === 0;
+  ctx.fillStyle = flip ? "#ffb703" : "#5c4408";
+  ctx.fillRect(-12, -24, 10, 4);
+  ctx.fillStyle = flip ? "#5c4408" : "#ffb703";
+  ctx.fillRect(2, -24, 10, 4);
+
+  ctx.restore();
+}
+
+/* The funnel. Top-down, so it reads as a rotating dust ring with a dark core
+   and a leaning column of condensation stacked toward the north. */
+function drawFunnel(f) {
+  const sx = f.x - cam.x, sy = f.y - cam.y;
+  if (sx < -f.reach * 1.2 || sx > W + f.reach * 1.2) return;
+  if (sy < -f.reach * 1.4 || sy > H + f.reach * 1.4) return;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  /* inflow: the outer field, faint, showing how far the pull reaches */
+  const halo = ctx.createRadialGradient(0, 0, f.core * 0.5, 0, 0, f.reach);
+  halo.addColorStop(0, "rgba(96,110,102,.30)");
+  halo.addColorStop(0.45, "rgba(70,82,76,.13)");
+  halo.addColorStop(1, "rgba(70,82,76,0)");
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(0, 0, f.reach, 0, TAU); ctx.fill();
+
+  /* the column, leaning back to the north-west as these things do */
+  for (let i = 7; i >= 1; i--) {
+    const up = i * f.core * 0.42;
+    const rr = f.core * (0.55 + i * 0.17);
+    ctx.fillStyle = "rgba(122,132,124," + (0.05 + 0.035 * (8 - i)) + ")";
+    ctx.beginPath();
+    ctx.ellipse(-up * 0.30, -up, rr, rr * 0.62, 0, 0, TAU);
+    ctx.fill();
+  }
+
+  /* dust ring at the ground, three counter-rotating bands of grit */
+  for (let band = 0; band < 3; band++) {
+    const rr = f.core * (0.75 + band * 0.42);
+    const n = 16 + band * 9;
+    const dir = band % 2 === 0 ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + f.swirl * dir * (1.5 - band * 0.32) + f.seed;
+      const wob = Math.sin(a * 3 + f.swirl) * f.core * 0.1;
+      const x = Math.cos(a) * (rr + wob);
+      const y = Math.sin(a) * (rr + wob) * 0.72;
+      ctx.fillStyle = "rgba(150,143,128," + (0.34 - band * 0.08) + ")";
+      ctx.beginPath();
+      ctx.arc(x, y, f.core * (0.075 - band * 0.012), 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  /* the core: dark, and the darkest thing on the screen */
+  const core = ctx.createRadialGradient(0, -f.core * 0.2, 2, 0, 0, f.core);
+  core.addColorStop(0, "rgba(6,9,8,.96)");
+  core.addColorStop(0.6, "rgba(24,30,27,.86)");
+  core.addColorStop(1, "rgba(48,56,50,.10)");
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.ellipse(0, 0, f.core, f.core * 0.86, 0, 0, TAU); ctx.fill();
+
+  /* suction streaks spiralling in */
+  ctx.strokeStyle = "rgba(200,196,182,.20)";
+  ctx.lineWidth = Math.max(1, f.core * 0.035);
+  for (let i = 0; i < 6; i++) {
+    const a0 = f.swirl * 1.7 + (i / 6) * TAU;
+    ctx.beginPath();
+    for (let s = 0; s <= 10; s++) {
+      const t = s / 10;
+      const rr = f.core * (0.35 + t * 1.9);
+      const a = a0 + t * 2.2;
+      const x = Math.cos(a) * rr, y = Math.sin(a) * rr * 0.74;
+      if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawWeather() {
+  const c = game.cfg;
+  /* rain in screen space, angled by the wind where the truck is standing */
+  const w = windAt(truck.x, truck.y, windSample);
+  const ax = clamp(w.fx / 260, -2.6, 2.6);
+  const t = game.t;
+  ctx.save();
+  ctx.strokeStyle = "rgba(180,214,200,.34)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const d of rainDrops) {
+    const y = ((d.y + t * d.sp * 0.55) % 1) * (H + 60) - 30;
+    const x = ((d.x + t * d.sp * 0.05 * ax) % 1 + 1) % 1 * W;
+    if (d.hail) continue;
+    const len = 12 * d.len;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + ax * len, y + len);
+  }
+  ctx.stroke();
+
+  if (c.hail > 0) {
+    ctx.fillStyle = "rgba(232,242,238,.72)";
+    for (const d of rainDrops) {
+      if (!d.hail) continue;
+      const y = ((d.y + t * d.sp * 0.8) % 1) * (H + 60) - 30;
+      const x = ((d.x + t * d.sp * 0.07 * ax) % 1 + 1) % 1 * W;
+      ctx.beginPath(); ctx.arc(x, y, 1.8 + d.len, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawBits() {
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+  for (const p of bits) {
+    ctx.globalAlpha = clamp(p.life * 1.6, 0, 1);
+    ctx.fillStyle = p.col;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.font = '600 12px "IBM Plex Mono", monospace';
+  ctx.textAlign = "center";
+  for (const t of toasts) {
+    ctx.globalAlpha = clamp(t.life / 1.7, 0, 1);
+    ctx.fillStyle = "#ffb703";
+    ctx.fillText(t.text, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawSkyWash() {
+  const c = game.cfg;
+  /* the storm's own darkness, plus a vignette that tightens near a funnel */
+  if (c.dark > 0) {
+    ctx.fillStyle = "rgba(4,8,7," + c.dark + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+  const vig = ctx.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.28,
+                                       W / 2, H * 0.55, Math.max(W, H) * 0.78);
+  vig.addColorStop(0, "rgba(0,0,0,0)");
+  vig.addColorStop(1, "rgba(0,0,0," + (0.34 + game.prox * 0.24) + ")");
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  if (game.flash > 0.02) {
+    ctx.fillStyle = "rgba(214,240,232," + game.flash * 0.3 + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  /* the lift warning bleeds in from the edges before the meter maxes */
+  if (truck && truck.lift > 66) {
+    const a = (truck.lift - 66) / 34;
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.62);
+    g.addColorStop(0, "rgba(255,77,46,0)");
+    g.addColorStop(0.55, "rgba(255,77,46," + a * 0.07 + ")");
+    g.addColorStop(1, "rgba(255,77,46," + a * 0.30 + ")");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function render() {
+  ctx.save();
+  if (game.shake > 0.2) {
+    ctx.translate(rand(-game.shake, game.shake), rand(-game.shake, game.shake));
+  }
+  drawGround();
+  drawShelter();
+  drawBuildings();
+  drawProps();
+  drawRiders();
+  drawProbes();
+  drawDebris();
+  drawTruck();
+  for (const f of funnels) drawFunnel(f);
+  drawBits();
+  drawWeather();
+  ctx.restore();
+  drawSkyWash();
+}
+
+/* ------------------------------ level flow -------------------------------- */
+const screens = {
+  title: document.getElementById("titleScreen"),
+  card:  document.getElementById("cardScreen"),
+  over:  document.getElementById("overScreen"),
+  pause: document.getElementById("pauseScreen"),
+};
+const efBig   = document.getElementById("efBig");
+const efName  = document.getElementById("efName");
+const efBrief = document.getElementById("efBrief");
+const overTitle = document.getElementById("overTitle");
+const overBody  = document.getElementById("overBody");
+const overStats = document.getElementById("overStats");
+const overGo    = document.getElementById("overGo");
+const bestFoot  = document.getElementById("bestFoot");
+
+function showScreen(name) {
+  for (const k in screens) screens[k].hidden = k !== name;
+  const playing = name === null;
+  hudEl.hidden = !playing && name !== "pause";
+  radarBox.hidden = hudEl.hidden;
+}
+
+function showBest() {
+  bestFoot.textContent = game.best > 0 ? "BEST — " + commas(game.best) : "NO RUNS LOGGED";
+}
+
+function startGame() {
+  game.score = 0;
+  game.lives = 3;
+  game.nextExtra = 25000;
+  game.level = 0;
+  showCard();
+}
+
+function showCard() {
+  game.cfg = LEVELS[game.level];
+  game.state = "card";
+  efBig.textContent = "EF" + game.cfg.ef;
+  efName.textContent = game.cfg.name;
+  efBrief.textContent = game.cfg.brief;
+  showScreen("card");
+}
+
+function beginLevel() {
+  const c = game.cfg;
+  game.span = c.span;
+  game.t = 0;
+  game.prox = 0;
+  game.shake = 0;
+  game.flash = 0;
+  game.nextBolt = 2.5;
+  debris = []; probes = []; bits = []; toasts = [];
+  buildTown(c.span);
+  truck = makeTruck();
+  spawnFunnels();
+  seedRain();
+  cam.x = truck.x - W / 2;
+  cam.y = truck.y - H * 0.58;
+  game.state = "run";
+  showScreen(null);
+  resetHUDCache();
+  updateHUD();
+  Sound.init(); Sound.resume(); Sound.siren();
+  flashRadio("DISPATCH", "unit 7, you are rolling into an EF" + c.ef + ". Shelter is due north.");
+}
+
+function endRun(reason, why) {
+  if (game.state !== "run") return;
+  game.state = reason;
+  game.outcomeT = 0;
+  for (const k in keys) keys[k] = false;
+
+  if (reason === "lifted") {
+    Sound.lift();
+    game.shake = 16;
+    flashRadio("NATALIE", "we are off the ground &mdash;");
+  } else if (reason === "wrecked") {
+    Sound.wreck();
+    game.shake = 18;
+    for (let i = 0; i < 26; i++) puff(truck.x, truck.y, pick(["#c8ccc4", "#ffb703", "#4a4f4d"]));
+    flashRadio("NATALIE", why === "wall" ? "that was the wall, not the wind" : "the truck is finished");
+  } else if (reason === "cleared") {
+    Sound.clear();
+    flashRadio("NATALIE", "we are inside, everybody out");
+  }
+}
+
+function statRow(cap, val) {
+  return '<div class="stat"><span class="cap">' + cap + '</span><span class="val">' + val + "</span></div>";
+}
+
+function resolveOutcome() {
+  const c = game.cfg;
+
+  if (game.state === "cleared") {
+    const delivered = truck.aboard;
+    const sampled = probes.filter(p => p.sampled).length;
+    const levelBonus = c.ef * 1200;
+    const rescueBonus = delivered * 900;
+    const shapeBonus = Math.round((100 - truck.dmg) * 14);
+    game.score += levelBonus + rescueBonus + shapeBonus;
+
+    overTitle.textContent = "SHELTER REACHED";
+    overTitle.className = "";
+    overBody.innerHTML = delivered > 0
+      ? "You put the truck under concrete with <em>" + delivered + "</em> " +
+        (delivered === 1 ? "person" : "people") + " in it. The EF" + c.ef + " is still on the ground behind you."
+      : "You made the shelter empty-handed. Everyone you drove past is still out there.";
+    overStats.innerHTML =
+      statRow("EF" + c.ef + " CLEARED", "+" + commas(levelBonus)) +
+      statRow("DELIVERED", delivered + " × 900") +
+      statRow("BODYWORK", "+" + commas(shapeBonus)) +
+      statRow("DIRECT SAMPLES", sampled) +
+      statRow("SCORE", commas(game.score));
+
+    game.level++;
+    if (game.level >= LEVELS.length) {
+      overTitle.textContent = "EF5 SURVIVED";
+      overBody.innerHTML = "Five nights, five ratings, and the wedge did not get you. " +
+        "Natalie logs the run and goes to find coffee.";
+      overGo.textContent = "PRESS ENTER FOR THE TITLE";
+      game.next = "title";
+    } else {
+      overGo.textContent = "PRESS ENTER FOR EF" + LEVELS[game.level].ef;
+      game.next = "card";
+    }
+  } else {
+    game.lives--;
+    const lifted = game.state === "lifted";
+    overTitle.textContent = lifted ? "PULLED UP" : "TRUCK DOWN";
+    overTitle.className = "bad";
+    overBody.innerHTML = lifted
+      ? "The inflow got under the truck and the ground let go. " +
+        (truck.aboard > 0 ? "There were <em>" + truck.aboard + "</em> people in it with you." : "At least it was only you.")
+      : "Too much sheet metal, too many walls. The EF" + c.ef +
+        " is still coming and the truck will not roll.";
+    overStats.innerHTML =
+      statRow("RATING", "EF" + c.ef) +
+      statRow("UNITS LEFT", Math.max(0, game.lives)) +
+      statRow("SCORE", commas(game.score));
+
+    if (game.lives <= 0) {
+      overTitle.textContent = "CHASE OVER";
+      overGo.textContent = "PRESS ENTER FOR THE TITLE";
+      game.next = "title";
+    } else {
+      overGo.textContent = "PRESS ENTER TO RUN IT AGAIN";
+      game.next = "retry";
+    }
+  }
+
+  if (game.score > game.best) {
+    game.best = game.score;
+    Store.set("hookEcho.best", game.best);
+  }
+  game.state = "over";
+  showScreen("over");
+}
+
+function onConfirm() {
+  Sound.init(); Sound.resume();
+  switch (game.state) {
+    case "title": startGame(); break;
+    case "card":  beginLevel(); break;
+    case "over":
+      if (game.next === "title") { game.state = "title"; showBest(); showScreen("title"); }
+      else if (game.next === "card") showCard();
+      else beginLevel();
+      break;
+    case "pause": togglePause(); break;
+  }
+}
+
+function togglePause() {
+  if (game.state === "run") {
+    game.state = "pause";
+    for (const k in keys) keys[k] = false;
+    if (isTouch) keys.gas = true;
+    Sound.ambient(0, 0, false);
+    showScreen("pause");
+  } else if (game.state === "pause") {
+    game.state = "run";
+    showScreen(null);
+  }
+}
+
+document.getElementById("quitBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  game.state = "title";
+  showBest();
+  showScreen("title");
+});
+
+/* ------------------------------- main loop -------------------------------- */
+let last = performance.now();
+
+function frame(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;          /* a tab that was away does not teleport you */
+
+  const live = game.state === "run" || game.state === "lifted" ||
+               game.state === "wrecked" || game.state === "cleared";
+
+  if (live) {
+    game.t += dt;
+    updateWeather(dt);
+    updateFunnels(dt);
+
+    if (game.state === "run") {
+      updateTruck(dt);
+      applyWind(dt);
+      collideBuildings();
+      updateRiders(dt);
+      updateProbes(dt);
+      checkShelter();
+    } else if (game.state === "lifted") {
+      /* the funnel has it now: rising, spinning, drifting into the core */
+      game.outcomeT += dt;
+      truck.alt = Math.min(1, truck.alt + dt * 0.55);
+      truck.spin += dt * (5 + truck.alt * 16);
+      let near = funnels[0], nd = Infinity;
+      for (const f of funnels) {
+        const d = dist(truck.x, truck.y, f.x, f.y);
+        if (d < nd) { nd = d; near = f; }
+      }
+      if (near) {
+        truck.x = lerp(truck.x, near.x, dt * 1.5);
+        truck.y = lerp(truck.y, near.y, dt * 1.5);
+      }
+      game.shake = Math.max(game.shake, 12);
+      if (game.outcomeT > 2.7) resolveOutcome();
+    } else if (game.state === "wrecked") {
+      game.outcomeT += dt;
+      truck.vx *= Math.exp(-3 * dt);
+      truck.vy *= Math.exp(-3 * dt);
+      truck.x += truck.vx * dt;
+      truck.y += truck.vy * dt;
+      if (Math.random() < dt * 8) puff(truck.x, truck.y, "#3c4340");
+      if (game.outcomeT > 2.0) resolveOutcome();
+    } else {
+      /* cleared: let the arrival land before the plate comes up */
+      game.outcomeT += dt;
+      truck.vx *= Math.exp(-5 * dt);
+      truck.vy *= Math.exp(-5 * dt);
+      truck.x += truck.vx * dt;
+      truck.y += truck.vy * dt;
+      if (game.outcomeT > 1.3) resolveOutcome();
+    }
+
+    updateDebris(dt);
+    updateBits(dt);
+    updateCamera(dt);
+    updateRadio(dt);
+    updateHUD();
+
+    const load = truck ? clamp(speedOf(truck) / TRUCK.topRoad, 0, 1) : 0;
+    Sound.ambient(game.prox, load, game.state === "run" && speedOf(truck) > 20);
+  } else if (game.state === "pause" || game.state === "over") {
+    updateRadio(dt);
+  }
+
+  if (truck && game.state !== "title") {
+    render();
+    drawRadar(dt);
+  } else {
+    drawTitleBackdrop(dt);
+  }
+
+  requestAnimationFrame(frame);
+}
+
+/* The title screen gets its own weather: one distant funnel walking the
+   horizon, so the page is already the game before you press anything. */
+const titleF = { x: 0, y: 0, core: 70, reach: 420, swirl: 0, seed: 3.2, t: 0 };
+
+function drawTitleBackdrop(dt) {
+  titleF.t += dt;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0f1a15");
+  g.addColorStop(1, "#070c0a");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  cam.x = 0; cam.y = 0;
+  titleF.swirl += dt * 2.2;
+  /* keep it off to the side so the plate never sits right on top of it */
+  titleF.x = W * (0.5 + (Math.sin(titleF.t * 0.13) > 0 ? 1 : -1) * 0.33 + Math.sin(titleF.t * 0.13) * 0.06);
+  titleF.y = H * 0.72;
+  titleF.core = Math.min(104, Math.max(52, H * 0.10));
+  titleF.reach = titleF.core * 5;
+  drawFunnel(titleF);
+
+  ctx.fillStyle = "rgba(4,8,7,.35)";
+  ctx.fillRect(0, 0, W, H);
+}
+
+showBest();
+showScreen("title");
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
